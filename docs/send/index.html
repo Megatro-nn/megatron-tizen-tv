@@ -1,162 +1,193 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1e2a3d">
-<link rel="icon" href="../icon.png">
-<title>Send URL to Megatron</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f8fb">
+<link rel="icon" href="../send-icon.png">
+<title>Send a link to Megatron</title>
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('mg_theme'); } catch (e) {}
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+})();
+</script>
 <style>
-  /* Palette + type lifted straight from the app (tizen-app/css/style.css) */
-  :root {
-    --bg:        #1e2a3d;
-    --bg-2:      #283549;
-    --bg-card:   #2a3854;
-    --bg-card-h: #3a4a6a;
-    --fg:        #ffffff;
-    --fg-mute:   #d0dae5;
-    --fg-dim:    #8da0b8;
-    --accent:    #4fc3f7;
-    --accent-2:  #81d4fa;
-    --accent-soft: rgba(79,195,247,.18);
-    --danger:    #ff6b6b;
-    --border:    rgba(255,255,255,.08);
-    --shadow:    0 8px 32px rgba(0,0,0,.45);
-    --r:         16px;
-    --r-sm:      10px;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; min-height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    display: flex; flex-direction: column; min-height: 100dvh;
-    padding: env(safe-area-inset-top) 18px calc(env(safe-area-inset-bottom) + 18px);
-  }
-  code, .mono { font-family: 'Consolas', ui-monospace, monospace; }
-
-  /* Brand header — icon top-left, wordmark beside it (matches app .brand) */
-  header { display: flex; align-items: center; gap: 16px; padding: 22px 2px 18px; }
-  .app-icon { width: 52px; height: 52px; border-radius: 12px; flex-shrink: 0; box-shadow: var(--shadow); }
-  header h1 { margin: 0; font-size: 26px; font-weight: 200; letter-spacing: 1px; color: var(--fg); }
-  header h1 span { color: var(--accent); font-weight: 600; margin-left: 6px; }
-
-  .card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--r); box-shadow: var(--shadow);
-    padding: 20px; margin-bottom: 14px;
-  }
-  label {
-    display: block; font-size: 13px; color: var(--fg-mute);
-    text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px;
-  }
-  input {
-    width: 100%; background: var(--bg-2); border: 2px solid var(--border);
-    border-radius: var(--r-sm); color: var(--fg); padding: 14px; font-size: 17px;
-    transition: border-color .15s ease, background .15s ease;
-  }
-  input::placeholder { color: var(--fg-dim); }
-  input:focus { outline: none; border-color: var(--accent); background: var(--bg-card-h); }
-  #code { font-family: 'Consolas', monospace; letter-spacing: 3px; text-align: center; }
-  #url  { font-family: 'Consolas', monospace; margin-top: 4px; }
-
-  /* Pill buttons (matches app .btn) */
-  button {
-    font: inherit; cursor: pointer; border: 3px solid transparent;
-    border-radius: 999px; transition: background .15s ease, border-color .15s ease, transform .1s ease, box-shadow .15s ease;
-  }
-  button:active { transform: scale(.97); }
-  button:disabled { opacity: .45; }
-  .btn-primary {
-    width: 100%; margin-top: 16px; padding: 16px; font-size: 18px; font-weight: 600;
-    background: var(--accent); color: #102035;
-  }
-  .btn-primary:not(:disabled):active { background: var(--accent-2); box-shadow: 0 0 0 6px var(--accent-soft); }
-  .btn-ghost { background: var(--bg-2); color: var(--fg); border-color: var(--border); }
-
-  .row { display: flex; gap: 10px; align-items: stretch; }
-  .row .grow { flex: 1; min-width: 0; }
-  .savebtn { padding: 0 22px; font-size: 15px; }
-
-  #status { margin: 14px 2px 0; font-size: 14px; min-height: 20px; }
-  #status.ok  { color: var(--accent); }
-  #status.bad { color: var(--danger); }
-  .hint { color: var(--fg-dim); font-size: 13px; line-height: 1.55; margin: 8px 2px 0; }
-  .hint b { color: var(--fg-mute); font-weight: 600; }
-
-  footer { margin-top: auto; padding-top: 18px; text-align: center; color: var(--fg-dim); font-size: 12px; }
+:root{--bg:#f6f8fb;--fg:#142033;--mute:#4a5a70;--card:#ffffff;--field:#eef3f9;--line:#d5deea;--accent:#0a84d0;--on-accent:#ffffff;--band:#eaf0f7;--bad:#c62828;--shadow:0 10px 34px rgba(20,40,70,.12)}
+[data-theme=dark]{--bg:#1e2a3d;--fg:#ffffff;--mute:#d0dae5;--card:#2a3854;--field:#222f45;--line:rgba(255,255,255,.12);--accent:#4fc3f7;--on-accent:#0b1a2a;--band:#18222f;--bad:#ff7b7b;--shadow:0 12px 40px rgba(0,0,0,.45)}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--fg);font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;line-height:1.5;min-height:100vh;padding:env(safe-area-inset-top) 18px calc(env(safe-area-inset-bottom) + 24px)}
+.wrap{max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;gap:14px;padding:20px 0 16px}
+header img{width:52px;height:52px;border-radius:13px;box-shadow:var(--shadow)}
+header h1{font-size:24px;font-weight:700;letter-spacing:-.3px;flex:1}header h1 span{color:var(--accent)}
+#theme{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:30px;padding:7px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.lead{color:var(--mute);font-size:15px;margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:20px;margin-bottom:14px}
+.card h2{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+input{width:100%;background:var(--field);border:2px solid transparent;border-radius:12px;color:var(--fg);padding:14px;font-size:16px;font-family:Consolas,ui-monospace,monospace}
+input::placeholder{color:var(--mute);opacity:.7}
+input:focus{outline:none;border-color:var(--accent)}
+button{font:inherit;cursor:pointer;border:2px solid transparent;border-radius:999px;transition:transform .1s ease}
+button:active{transform:scale(.97)}button:disabled{opacity:.45}
+.p{width:100%;margin-top:12px;padding:15px;font-size:17px;font-weight:700;background:var(--accent);color:var(--on-accent)}
+.o{width:100%;margin-top:10px;padding:12px;font-size:15px;font-weight:600;background:transparent;color:var(--accent);border-color:var(--accent)}
+.row{display:flex;gap:10px}.row input{flex:1;min-width:0}.row button{padding:0 20px;font-size:15px;font-weight:600;background:var(--accent);color:var(--on-accent)}
+.paired{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dots{font-family:Consolas,ui-monospace,monospace;font-size:20px;letter-spacing:3px;flex:1}
+.lnk{background:none;border:none;color:var(--accent);padding:4px 2px;font-size:14px;font-weight:600}
+.lnk.bad{color:var(--bad)}
+#status{min-height:22px;margin-top:12px;font-size:14px;color:var(--mute)}#status.ok{color:var(--accent)}#status.bad{color:var(--bad)}
+.hint{color:var(--mute);font-size:13px;margin-top:10px}.hint b{color:var(--fg)}
+.item{padding:10px 0;border-top:1px solid var(--line)}.item:first-of-type{border-top:0}
+.item .u{font-family:Consolas,ui-monospace,monospace;font-size:13px;word-break:break-all;color:var(--fg)}
+.item .a{display:flex;gap:16px;margin-top:4px}
+.warn{background:var(--band);border-radius:14px;padding:14px 16px;font-size:13px;color:var(--mute);margin-top:6px}.warn b{color:var(--fg)}
+footer{text-align:center;color:var(--mute);font-size:12px;padding-top:18px}footer a{text-decoration:underline}
+.hide{display:none}
 </style>
 </head>
 <body>
-  <header>
-    <img class="app-icon" src="../icon.png" alt="Megatron">
-    <h1>Send to<span>Megatron</span></h1>
-  </header>
+<div class="wrap">
+<header>
+  <img src="../send-icon.png" alt="Megatron Send">
+  <h1>Send to <span>Megatron</span></h1>
+  <button id="theme" type="button" aria-label="Switch light or dark">Dark</button>
+</header>
+<p class="lead">Paste a stream link, tap Send, then press one button on your TV.</p>
 
-  <section class="card">
-    <label for="code">Pairing code (shown on your TV)</label>
+<section class="card" id="pairCard">
+  <h2>Pairing</h2>
+  <div id="pairedView" class="paired hide">
+    <span class="dots" id="dots"></span>
+    <button class="lnk" id="change" type="button">Change</button>
+    <button class="lnk bad" id="forget" type="button">Forget</button>
+  </div>
+  <div id="enterView">
     <div class="row">
-      <div class="grow">
-        <input id="code" inputmode="text" autocomplete="off" spellcheck="false" placeholder="paste your code">
-      </div>
-      <button class="btn-ghost savebtn" id="savecode" type="button">Save</button>
+      <input id="code" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="paste your code">
+      <button id="savecode" type="button">Save</button>
     </div>
-    <p class="hint">On the TV: <b>Open Network Stream &rarr; Get URL from device</b>. The code is shown there. You only enter it once.</p>
-  </section>
+    <p class="hint">On the TV open <b>Settings, Cast from another device</b>. The code is shown there. You only enter it once.</p>
+  </div>
+</section>
 
-  <section class="card">
-    <label for="url">Stream URL</label>
-    <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
-           placeholder="https://&hellip; &middot; rtsp://&hellip; &middot; &hellip;/playlist.m3u8">
-    <button class="btn-primary" id="send" type="button">Send to TV</button>
-    <p id="status"></p>
-    <p class="hint">After sending, press <b>Get URL from device</b> on the TV to play it.</p>
-  </section>
+<section class="card">
+  <h2>Link</h2>
+  <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="https://... or rtsp://... or .../playlist.m3u8">
+  <button class="p" id="send" type="button">Send to TV</button>
+  <button class="o" id="queueadd" type="button">Add to queue</button>
+  <p id="status"></p>
+  <p class="hint">After sending, press <b>Get URL from device</b> on the TV to play it.</p>
+</section>
 
-  <footer>Keep your pairing code private: anyone who has it can send links to your TV. No app, no account &mdash; uses ntfy.sh. <a href="../" style="color:inherit">Megatron home</a></footer>
+<section class="card hide" id="queueCard">
+  <h2>Queue</h2>
+  <div id="queue"></div>
+  <p class="hint">The TV picks up one link at a time, the newest one. Send them one by one.</p>
+</section>
+
+<section class="card hide" id="recentCard">
+  <h2>Recently sent <button class="lnk" id="clear" type="button">Clear</button></h2>
+  <div id="recent"></div>
+</section>
+
+<div class="warn"><b>Keep your pairing code private.</b> Anyone who has it can send links to your TV. Do not post it or share screenshots of it. You can make a new code in the TV app's Settings.</div>
+
+<footer>No account. Links go through the free ntfy.sh service. <a href="../">Megatron home</a> &middot; <a href="https://github.com/Megatro-nn/megatrontizentv-send-to">Phone apps</a></footer>
+</div>
 
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var NTFY = 'https://ntfy.sh';
-  var LS_CODE = 'vlctv_drop_code';
+  var NTFY = 'https://ntfy.sh', LS_CODE = 'vlctv_drop_code', LS_Q = 'mg_queue', LS_R = 'mg_recent';
+  var root = document.documentElement;
 
-  var fromHash = (location.hash || '').replace('#', '').trim();
-  var saved = '';
-  try { saved = localStorage.getItem(LS_CODE) || ''; } catch (e) {}
-  var initial = fromHash || saved;
-  if (initial) $('code').value = initial;
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
+  function load(k) { try { var a = JSON.parse(store(k) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function save(k, a) { store(k, JSON.stringify(a)); }
 
-  function persist(code) { try { localStorage.setItem(LS_CODE, code); } catch (e) {} }
-  function setStatus(text, kind) { var el = $('status'); el.textContent = text || ''; el.className = kind || ''; }
+  /* theme */
+  function label() { $('theme').textContent = root.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark'; }
+  $('theme').addEventListener('click', function () {
+    var n = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', n); store('mg_theme', n); label();
+    var m = document.querySelector('meta[name=theme-color]'); if (m) m.content = n === 'dark' ? '#1e2a3d' : '#f6f8fb';
+  });
+  label();
 
+  /* code */
+  var code = (location.hash || '').replace('#', '').trim() || store(LS_CODE) || '';
+  if (code) store(LS_CODE, code);
+  function showCode() {
+    var has = !!code;
+    $('pairedView').className = 'paired' + (has ? '' : ' hide');
+    $('enterView').className = has ? 'hide' : '';
+    if (has) $('dots').textContent = code.length > 4 ? code.slice(0, 2) + new Array(code.length - 3).join('\u2022') + code.slice(-2) : code;
+  }
+  function setStatus(t, k) { var e = $('status'); e.textContent = t || ''; e.className = k || ''; }
   $('savecode').addEventListener('click', function () {
     var c = ($('code').value || '').trim();
-    if (!c) { $('code').focus(); return; }
-    persist(c); setStatus('Code saved', 'ok');
+    if (!/^[A-Za-z0-9]{6,40}$/.test(c)) { setStatus('That does not look like a pairing code', 'bad'); return; }
+    code = c; store(LS_CODE, c); $('code').value = ''; showCode(); setStatus('Paired with your TV', 'ok');
   });
+  $('change').addEventListener('click', function () { code = ''; showCode(); $('code').focus(); });
+  $('forget').addEventListener('click', function () { code = ''; store(LS_CODE, ''); showCode(); setStatus('', ''); });
 
-  function send() {
-    var code = ($('code').value || '').trim();
-    var url  = ($('url').value || '').trim();
-    if (!code) { setStatus('Enter the pairing code first', 'bad'); $('code').focus(); return; }
-    if (!url)  { setStatus('Paste a URL first', 'bad'); $('url').focus(); return; }
-    persist(code); setStatus('Sending\u2026', ''); $('send').disabled = true;
-    fetch(NTFY + '/' + encodeURIComponent('megatron-' + code), {
-      method: 'POST', body: url, headers: { 'Title': 'Megatron URL' }
-    })
-    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status);
-      setStatus('Sent \u2014 now press \u201CGet URL from device\u201D on the TV', 'ok'); })
-    .catch(function (e) { setStatus('Failed to send (' + e.message + ')', 'bad'); })
-    .then(function () { $('send').disabled = false; });
+  /* lists */
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function render() {
+    var q = load(LS_Q), r = load(LS_R);
+    $('queueCard').className = 'card' + (q.length ? '' : ' hide');
+    $('recentCard').className = 'card' + (r.length ? '' : ' hide');
+    $('queue').innerHTML = q.map(function (u, i) {
+      return '<div class="item"><div class="u">' + esc(u) + '</div><div class="a"><button class="lnk" data-q="' + i + '">Send</button><button class="lnk bad" data-d="' + i + '">Remove</button></div></div>';
+    }).join('');
+    $('recent').innerHTML = r.map(function (u, i) {
+      return '<div class="item"><div class="u">' + esc(u) + '</div><div class="a"><button class="lnk" data-r="' + i + '">Send again</button></div></div>';
+    }).join('');
   }
-  $('send').addEventListener('click', send);
-  $('url').addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
+  $('queue').addEventListener('click', function (e) {
+    var t = e.target, q = load(LS_Q);
+    if (t.dataset.q !== undefined) send(q[+t.dataset.q], +t.dataset.q);
+    if (t.dataset.d !== undefined) { q.splice(+t.dataset.d, 1); save(LS_Q, q); render(); }
+  });
+  $('recent').addEventListener('click', function (e) {
+    var i = e.target.dataset.r; if (i !== undefined) send(load(LS_R)[+i]);
+  });
+  $('clear').addEventListener('click', function () { save(LS_R, []); render(); });
+
+  function pull(text) { var m = /(https?|rtsp|rtmp):\/\/\S+/.exec(text || ''); return (m ? m[0] : (text || '')).trim(); }
+
+  var busy = false;
+  function send(raw, qIndex) {
+    var url = pull(raw);
+    if (!code) { setStatus('Pair with your TV first', 'bad'); return; }
+    if (!url) { setStatus('Paste a link first', 'bad'); $('url').focus(); return; }
+    if (busy) return; busy = true; $('send').disabled = true; setStatus('Sending\u2026', '');
+    fetch(NTFY + '/' + encodeURIComponent('megatron-' + code), { method: 'POST', body: url, headers: { 'Title': 'Megatron URL' } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        setStatus('Sent. Now press \u201CGet URL from device\u201D on the TV.', 'ok');
+        var rec = load(LS_R).filter(function (x) { return x !== url; }); rec.unshift(url); save(LS_R, rec.slice(0, 20));
+        if (qIndex !== undefined) { var q = load(LS_Q); q.splice(qIndex, 1); save(LS_Q, q); } else { $('url').value = ''; }
+        render();
+      })
+      .catch(function (e) { setStatus('Failed to send (' + e.message + ')', 'bad'); })
+      .then(function () { busy = false; $('send').disabled = false; });
+  }
+  $('send').addEventListener('click', function () { send($('url').value); });
+  $('url').addEventListener('keydown', function (e) { if (e.key === 'Enter') send($('url').value); });
+  $('queueadd').addEventListener('click', function () {
+    var u = pull($('url').value); if (!u) { setStatus('Paste a link first', 'bad'); return; }
+    var q = load(LS_Q); q.push(u); save(LS_Q, q); $('url').value = ''; setStatus('Added to the queue', 'ok'); render();
+  });
 
   var qUrl = new URLSearchParams(location.search).get('url');
   if (qUrl) $('url').value = qUrl;
+  showCode(); render();
 })();
 </script>
 </body>
