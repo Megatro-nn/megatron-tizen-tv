@@ -109,6 +109,27 @@ Most docs come from Tessel and still say "Tessel"; the instructions apply to Meg
 - [Reading the app's log](docs/DEBUG-LOG.md)
 - [Why a web app and not native](docs/WHY-WEB-APP.md)
 
+## Roadmap
+
+Ideas for later. None of these are promised, and the order can change.
+
+**On the TV**
+- A "Continue watching" row on the home screen.
+- Auto next episode with a countdown.
+- Subtitle search on the TV when a video has none.
+- Audio language memory per show.
+- A PIN lock for chosen folders.
+- A fully mirrored right-to-left layout for Arabic.
+- Movie and show poster covers from the web (optional).
+- Video thumbnails.
+
+**Send to Megatron (phone)**
+- A link queue and a "Recently sent" list on the send page.
+- Settings backup and restore as one file from the phone page.
+- An installable web page (works on iPhone and Android).
+- An Android APK with a Share menu entry.
+- An iOS Shortcut for the Share menu.
+
 ## Translations
 
 The app follows the TV's menu language, or *Settings → App language*. Every string lives in `tizen-app/i18n/<locale>.json`; `en.json` is the source and missing keys fall back to English. Arabic is complete for Megatron's new screens; other languages show the new strings in English until translated. Translations are welcome as pull requests.
