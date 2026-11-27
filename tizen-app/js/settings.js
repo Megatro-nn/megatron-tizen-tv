@@ -33,6 +33,8 @@ var Settings = (function () {
         // #142).  Off: nothing new is remembered and the tile is hidden;
         // what was listed before stays until it is cleared.
         recentHistory:    true,
+        // Clock on every screen and in the player: '24' (13:05) or '12' (1:05 PM).
+        clockFormat:      '24',
         shuffle:          false,       // randomize playlist order (folder + recent) instead of alphabetical
         // What the USB and SMB browsers list: 'all' files (pictures and text
         // open in the viewers, anything else is shown but can't be opened),

@@ -436,6 +436,7 @@
             case 'setting-auto-play':     openAutoPlayPicker(); break;
             case 'setting-resume-mode':   openResumeModePicker(); break;
             case 'setting-recent':        openRecentPicker(); break;
+            case 'setting-clock-format':  openClockFormatPicker(); break;
             case 'setting-network':       openNetworkPicker(); break;
             case 'setting-recent-clear':  confirmRecentClear(); break;
             case 'setting-new-code':      confirmNewCode(); break;
@@ -3186,6 +3187,7 @@
         document.getElementById('setting-repeat-mode-value').textContent   = repeatName(Settings.get('repeatMode'));
         document.getElementById('setting-auto-play-value').textContent     = I18n.t(Settings.get('autoPlay') ? 'common.on' : 'common.off');
         document.getElementById('setting-resume-mode-value').textContent   = resumeModeName(Settings.get('resumeMode'));
+        document.getElementById('setting-clock-format-value').textContent  = I18n.t(Settings.get('clockFormat') === '12' ? 'clock.h12' : 'clock.h24');
         document.getElementById('setting-recent-value').textContent        = I18n.t(Settings.get('recentHistory') ? 'common.on' : 'common.off');
         document.getElementById('setting-shuffle-value').textContent       = I18n.t(Settings.get('shuffle') ? 'common.on' : 'common.off');
         document.getElementById('setting-aspect-mode-value').textContent   = AspectRatio.nameFor(Settings.get('aspectMode'));
@@ -3524,6 +3526,20 @@
             Settings.set('resumeMode', val);
             refreshSettingsValues();
             UI.toast(I18n.t('toast.resume', resumeModeName(val)));
+        });
+    }
+    /* ── Clock: 24-hour or 12-hour ─────────────────────────────────── */
+    function openClockFormatPicker() {
+        pickerSetting = 'clockFormat';
+        openPicker(I18n.t('settings.clockFormat'), [
+            { code: '24', name: I18n.t('clock.h24') },
+            { code: '12', name: I18n.t('clock.h12') }
+        ], Settings.get('clockFormat'), function (val) {
+            Settings.set('clockFormat', val === '12' ? '12' : '24');
+            updateGlobalClock();
+            updateOsdClock();
+            refreshSettingsValues();
+            UI.toast(I18n.t('toast.setTo', I18n.t('settings.clockFormat'), I18n.t(val === '12' ? 'clock.h12' : 'clock.h24')));
         });
     }
     /* ── Recently Played on/off + clear (issue #142) ───────────────── */
@@ -3936,15 +3952,22 @@
     /* Clock and "ends at" in the top bar while the controls are up. */
     var osdClockTimer = null;
     function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    /* Clock text in the user's chosen format (Settings, Clock): 24-hour 13:05 or 12-hour 1:05 PM. */
+    function formatClock(d) {
+        var h = d.getHours(), m = pad2(d.getMinutes());
+        if (Settings.get('clockFormat') !== '12') return pad2(h) + ':' + m;
+        var suffix = I18n.t(h < 12 ? 'clock.am' : 'clock.pm');
+        return (h % 12 || 12) + ':' + m + ' ' + suffix;
+    }
     function updateOsdClock() {
         var el = document.getElementById('osd-clock');
         if (!el) return;
-        var now = new Date(), txt = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+        var now = new Date(), txt = formatClock(now);
         var speed = (Player.getSpeed ? Player.getSpeed() : 1) || 1;
         var left = (lastProgress.duration - lastProgress.time) / speed;
         if (lastProgress.duration > 0 && left > 0) {
             var end = new Date(now.getTime() + left);
-            txt += '  ·  ' + I18n.t('osd.endsAt', pad2(end.getHours()) + ':' + pad2(end.getMinutes()));
+            txt += '  ·  ' + I18n.t('osd.endsAt', formatClock(end));
         }
         el.textContent = txt;
     }
@@ -3954,7 +3977,7 @@
         var el = document.getElementById('global-clock');
         if (!el) return;
         var now = new Date();
-        el.textContent = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+        el.textContent = formatClock(now);
     }
     function startGlobalClock() { updateGlobalClock(); setInterval(updateGlobalClock, 15000); }
     function startOsdClock() { stopOsdClock(); osdClockTimer = setInterval(updateOsdClock, 15000); }

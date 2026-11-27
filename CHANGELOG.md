@@ -4,6 +4,8 @@
 
 - Removed the Apple and Mux sample stream buttons from the Play URL screen.
 - New "Make a new code" button in Settings, Cast from another device, and a note to keep the pairing code private.
+- Settings, Cast from another device now names the Megatron Send phone app (Android and iPhone) and uses the new send page address.
+- New Settings option, Clock: show the time in 24-hour (default) or 12-hour format, on every screen and in the player (clock and "ends at" time).
 
 ## 1.0.0
 
