@@ -24,9 +24,7 @@ var UrlDrop = (function () {
 
     var CODE_KEY   = 'urlDropCode';
     var NTFY_BASE  = 'https://ntfy.sh';
-    // GitHub Pages page users open on their phone (deploy docs/index.html).
-    // Before 1.7.0 this was vlc-tizen.madebypatrick.nl, which still redirects
-    // here (query and #code intact) for TVs running an older version.
+    // GitHub Pages page users open on their phone (served from docs/index.html).
     var PHONE_PAGE = 'https://megatro-nn.github.io/megatron-tizen-tv/';
 
     function log(m) { if (typeof Debug !== 'undefined' && Debug.net) Debug.net('[url-drop] ' + m); }
@@ -45,6 +43,14 @@ var UrlDrop = (function () {
             c = genCode();
             try { if (typeof Settings !== 'undefined') Settings.set(CODE_KEY, c); } catch (e) {}
         }
+        return c;
+    }
+
+    /* A fresh code for this TV: the old one stops working at once, so any
+     * phone paired with it has to scan the new QR. */
+    function newCode() {
+        var c = genCode();
+        try { if (typeof Settings !== 'undefined') Settings.set(CODE_KEY, c); } catch (e) {}
         return c;
     }
 
@@ -124,6 +130,7 @@ var UrlDrop = (function () {
 
     return {
         code:       code,
+        newCode:    newCode,
         topic:      topic,
         pageUrl:    pageUrl,
         deviceUrl:  deviceUrl,

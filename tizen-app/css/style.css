@@ -1056,6 +1056,12 @@ button:focus { outline: none; }
     color: var(--fg-mute);
     line-height: 1.7;       /* doubles as spacing between the two lines */
 }
+.cast-warn {
+    font-size: 20px;
+    color: #ffd98a;
+    line-height: 1.5;
+    margin: 14px 0 8px;
+}
 .pair-emph {
     color: var(--accent);
     font-family: 'Consolas', monospace;

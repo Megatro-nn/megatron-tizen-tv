@@ -3,6 +3,7 @@
 ## 1.0.1
 
 - Removed the Apple and Mux sample stream buttons from the Play URL screen.
+- New "Make a new code" button in Settings, Cast from another device, and a note to keep the pairing code private.
 
 ## 1.0.0
 

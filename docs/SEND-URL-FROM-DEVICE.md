@@ -13,23 +13,22 @@ when you press **📲 Get URL from device** on the TV, it does a single GET of
 that topic and plays the most recent URL.
 
 ```
- device page (GitHub Pages)  ──POST──▶  ntfy.sh/vlctv-<code>  ◀──GET──  Tessel
+ device page (GitHub Pages)  ──POST──▶  ntfy.sh/megatron-<code>  ◀──GET──  Megatron
 ```
 
 Pairing: each TV mints a long random code once. It's shown in **Settings →
 Cast from another device**, together with a QR code. Scan the QR (or enter the
 code once — the browser remembers it) and you're paired. The topic is
-`vlctv-<code>`.
+`megatron-<code>`.
 
 ## Host the device page
 
 The page is `docs/index.html` (plus `icon.png`). Serve it over **HTTPS** at the
 URL set in `PHONE_PAGE` in `js/url-drop.js` — currently:
 
-`https://tessel.madebypatrick.nl/`
+`https://megatro-nn.github.io/megatron-tizen-tv/`
 
-(Before 1.7.0 it was `vlc-tizen.madebypatrick.nl`. That name still redirects
-to the new one, so the QR code on TVs running an older version keeps working.)
+This is GitHub Pages, served from the `docs/` folder of the `main` branch.
 
 HTTPS is required: the page POSTs to `https://ntfy.sh`, so a plain-HTTP page is
 blocked by the browser as mixed content and sending fails silently. Any static
@@ -45,7 +44,7 @@ via a `CNAME` file in `docs/`).
    field and plays.
 
 The QR encodes the page URL with the code in the hash
-(`…/tessel-tizen-tv/#<code>`), so scanning opens the page already paired. The QR
+(`…/megatron-tizen-tv/#<code>`), so scanning opens the page already paired. The QR
 is generated **on the TV, offline** (bundled `js/qrcode.js`, MIT) — the pairing
 code is never sent to a third-party QR service.
 

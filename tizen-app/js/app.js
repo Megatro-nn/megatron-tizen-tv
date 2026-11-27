@@ -438,6 +438,7 @@
             case 'setting-recent':        openRecentPicker(); break;
             case 'setting-network':       openNetworkPicker(); break;
             case 'setting-recent-clear':  confirmRecentClear(); break;
+            case 'setting-new-code':      confirmNewCode(); break;
             case 'setting-shuffle':       openShufflePicker(); break;
             case 'setting-aspect-mode':   openAspectPicker(); break;
             case 'setting-browse-filter': openBrowseFilterPicker(); break;
@@ -3575,6 +3576,18 @@
             if (retry) retry();
         });
     });
+    function confirmNewCode() {
+        if (typeof UrlDrop === 'undefined') return;
+        openPicker(I18n.t('cast.newCodeConfirm'), [
+            { code: 'new',  name: I18n.t('cast.newCode') },
+            { code: 'keep', name: I18n.t('common.cancel') }
+        ], 'keep', function (code) {
+            if (code !== 'new') return;
+            UrlDrop.newCode();
+            renderPairingBlock();
+            UI.toast(I18n.t('cast.newCodeDone'));
+        });
+    }
     function confirmRecentClear() {
         if (!getRecent().length) { UI.toast(I18n.t('recent.none')); return; }
         openPicker(I18n.t('recent.clearConfirm'), [
