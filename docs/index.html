@@ -1,162 +1,107 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1e2a3d">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Megatron: a media player for Samsung TVs</title>
+<meta name="description" content="Free, open source media player for Samsung Tizen TVs. USB, SMB, WebDAV and DLNA, with subtitles, fan art and themes.">
 <link rel="icon" href="icon.png">
-<title>Send URL to Megatron</title>
+<script>
+/* Old pairing QR codes opened this page with the code after #.
+   Send them on to the send page, code kept. */
+if (location.hash.length > 1) { location.replace('send/' + location.hash); }
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('mg_theme'); } catch (e) {}
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+})();
+</script>
 <style>
-  /* Palette + type lifted straight from the app (tizen-app/css/style.css) */
-  :root {
-    --bg:        #1e2a3d;
-    --bg-2:      #283549;
-    --bg-card:   #2a3854;
-    --bg-card-h: #3a4a6a;
-    --fg:        #ffffff;
-    --fg-mute:   #d0dae5;
-    --fg-dim:    #8da0b8;
-    --accent:    #4fc3f7;
-    --accent-2:  #81d4fa;
-    --accent-soft: rgba(79,195,247,.18);
-    --danger:    #ff6b6b;
-    --border:    rgba(255,255,255,.08);
-    --shadow:    0 8px 32px rgba(0,0,0,.45);
-    --r:         16px;
-    --r-sm:      10px;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; min-height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    display: flex; flex-direction: column; min-height: 100dvh;
-    padding: env(safe-area-inset-top) 18px calc(env(safe-area-inset-bottom) + 18px);
-  }
-  code, .mono { font-family: 'Consolas', ui-monospace, monospace; }
-
-  /* Brand header — icon top-left, wordmark beside it (matches app .brand) */
-  header { display: flex; align-items: center; gap: 16px; padding: 22px 2px 18px; }
-  .app-icon { width: 52px; height: 52px; border-radius: 12px; flex-shrink: 0; box-shadow: var(--shadow); }
-  header h1 { margin: 0; font-size: 26px; font-weight: 200; letter-spacing: 1px; color: var(--fg); }
-  header h1 span { color: var(--accent); font-weight: 600; margin-left: 6px; }
-
-  .card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--r); box-shadow: var(--shadow);
-    padding: 20px; margin-bottom: 14px;
-  }
-  label {
-    display: block; font-size: 13px; color: var(--fg-mute);
-    text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px;
-  }
-  input {
-    width: 100%; background: var(--bg-2); border: 2px solid var(--border);
-    border-radius: var(--r-sm); color: var(--fg); padding: 14px; font-size: 17px;
-    transition: border-color .15s ease, background .15s ease;
-  }
-  input::placeholder { color: var(--fg-dim); }
-  input:focus { outline: none; border-color: var(--accent); background: var(--bg-card-h); }
-  #code { font-family: 'Consolas', monospace; letter-spacing: 3px; text-align: center; }
-  #url  { font-family: 'Consolas', monospace; margin-top: 4px; }
-
-  /* Pill buttons (matches app .btn) */
-  button {
-    font: inherit; cursor: pointer; border: 3px solid transparent;
-    border-radius: 999px; transition: background .15s ease, border-color .15s ease, transform .1s ease, box-shadow .15s ease;
-  }
-  button:active { transform: scale(.97); }
-  button:disabled { opacity: .45; }
-  .btn-primary {
-    width: 100%; margin-top: 16px; padding: 16px; font-size: 18px; font-weight: 600;
-    background: var(--accent); color: #102035;
-  }
-  .btn-primary:not(:disabled):active { background: var(--accent-2); box-shadow: 0 0 0 6px var(--accent-soft); }
-  .btn-ghost { background: var(--bg-2); color: var(--fg); border-color: var(--border); }
-
-  .row { display: flex; gap: 10px; align-items: stretch; }
-  .row .grow { flex: 1; min-width: 0; }
-  .savebtn { padding: 0 22px; font-size: 15px; }
-
-  #status { margin: 14px 2px 0; font-size: 14px; min-height: 20px; }
-  #status.ok  { color: var(--accent); }
-  #status.bad { color: var(--danger); }
-  .hint { color: var(--fg-dim); font-size: 13px; line-height: 1.55; margin: 8px 2px 0; }
-  .hint b { color: var(--fg-mute); font-weight: 600; }
-
-  footer { margin-top: auto; padding-top: 18px; text-align: center; color: var(--fg-dim); font-size: 12px; }
+:root{--bg:#f6f8fb;--fg:#142033;--mute:#4a5a70;--card:#ffffff;--line:#d5deea;--accent:#0a84d0;--on-accent:#ffffff;--band:#eaf0f7;--shadow:0 16px 50px rgba(20,40,70,.18)}
+[data-theme=dark]{--bg:#1e2a3d;--fg:#ffffff;--mute:#d0dae5;--card:#2a3854;--line:rgba(255,255,255,.12);--accent:#4fc3f7;--on-accent:#0b1a2a;--band:#18222f;--shadow:0 20px 60px rgba(0,0,0,.5)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;line-height:1.5}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;flex-wrap:wrap;gap:12px}
+.brand{display:flex;align-items:center;gap:12px;font-size:23px;font-weight:700}.brand img{width:42px;height:42px;border-radius:10px}
+.links{display:flex;align-items:center;gap:26px;font-size:16px;color:var(--mute);flex-wrap:wrap}
+.links a:hover{color:var(--fg)}
+#theme{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:30px;padding:8px 16px;font-size:14px;cursor:pointer;font-family:inherit}
+.hero{display:flex;gap:48px;align-items:center;padding:44px 0 64px;flex-wrap:wrap}
+.hero .t{flex:1 1 420px}
+h1{font-size:clamp(36px,5vw,58px);line-height:1.06;font-weight:800;letter-spacing:-1px}h1 span{color:var(--accent)}
+.hero p{color:var(--mute);font-size:20px;margin:20px 0 30px}
+.btn{display:inline-block;padding:15px 28px;border-radius:40px;font-size:17px;font-weight:600;margin:0 12px 12px 0}
+.p{background:var(--accent);color:var(--on-accent)}.s{border:2px solid var(--line);color:var(--fg)}
+.small{color:var(--mute);font-size:14px;opacity:.85}
+.hero img{flex:1 1 440px;max-width:600px;width:100%;border-radius:18px;box-shadow:var(--shadow)}
+h2{font-size:32px;text-align:center;padding:24px 0 26px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.c{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px}
+.c i{display:block;font-style:normal;color:var(--accent);font-weight:700;font-size:21px}
+.c b{display:block;font-size:20px;margin:10px 0 8px}.c span{color:var(--mute);font-size:16px}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;padding:48px 0}
+.shots img{width:100%;border-radius:14px;box-shadow:var(--shadow)}
+.steps{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 32px;color:var(--mute);font-size:17px}
+.steps ol{padding-left:22px}.steps li{margin:8px 0}.steps b{color:var(--fg)}
+.send{display:flex;gap:30px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:48px 0 20px;padding:30px 32px;border-radius:18px;background:var(--band)}
+.send b{font-size:22px}.send span{display:block;color:var(--mute);margin-top:4px}
+footer{background:var(--band);margin-top:50px;padding:34px 0;color:var(--mute);font-size:15px}
+footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+footer b{color:var(--fg)}.k{background:var(--accent);color:var(--on-accent);padding:11px 22px;border-radius:30px;font-weight:700}
 </style>
 </head>
 <body>
-  <header>
-    <img class="app-icon" src="icon.png" alt="Megatron">
-    <h1>Send to<span>Megatron</span></h1>
-  </header>
-
-  <section class="card">
-    <label for="code">Pairing code (shown on your TV)</label>
-    <div class="row">
-      <div class="grow">
-        <input id="code" inputmode="text" autocomplete="off" spellcheck="false" placeholder="paste your code">
-      </div>
-      <button class="btn-ghost savebtn" id="savecode" type="button">Save</button>
-    </div>
-    <p class="hint">On the TV: <b>Open Network Stream &rarr; Get URL from device</b>. The code is shown there. You only enter it once.</p>
-  </section>
-
-  <section class="card">
-    <label for="url">Stream URL</label>
-    <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
-           placeholder="https://&hellip; &middot; rtsp://&hellip; &middot; &hellip;/playlist.m3u8">
-    <button class="btn-primary" id="send" type="button">Send to TV</button>
-    <p id="status"></p>
-    <p class="hint">After sending, press <b>Get URL from device</b> on the TV to play it.</p>
-  </section>
-
-  <footer>no app, no account &mdash; uses ntfy.sh</footer>
-
+<div class="wrap">
+<nav>
+  <a class="brand" href="./"><img src="icon.png" alt="">Megatron</a>
+  <div class="links"><a href="#features">Features</a><a href="#screens">Screenshots</a><a href="#install">Install</a><a href="send/">Send a link to your TV</a><a href="https://github.com/Megatro-nn/megatron-tizen-tv">GitHub</a><button id="theme" type="button" aria-label="Switch light or dark">Dark</button></div>
+</nav>
+<section class="hero">
+  <div class="t">
+    <h1>The media player your <span>Samsung TV</span> was missing</h1>
+    <p>Play videos from a USB drive, SMB, WebDAV and DLNA. Browse like Windows Explorer, with watched percentages, fan art, subtitles in Arabic and more. Free and open source.</p>
+    <a class="btn p" href="https://github.com/Megatro-nn/megatron-tizen-tv/releases/latest">Download</a><a class="btn s" href="https://github.com/Megatro-nn/megatron-tizen-tv">View on GitHub</a>
+    <div class="small">Samsung Tizen TVs &middot; MIT license</div>
+  </div>
+  <img src="screenshots/home-aurora.jpg" alt="Megatron home screen on a TV">
+</section>
+<h2 id="features">What you get</h2>
+<div class="grid">
+  <div class="c"><i>01</i><b>Explorer-style folders</b><span>Five views, sort by name, date, size or type. Big USB drives stay easy.</span></div>
+  <div class="c"><i>02</i><b>Watched percentage</b><span>A bar and a % on every video. You always land where you stopped.</span></div>
+  <div class="c"><i>03</i><b>Better subtitles</b><span>Auto language, delay, an encoding picker for Arabic, saved looks.</span></div>
+  <div class="c"><i>04</i><b>Your look</b><span>Ten themes, twelve colours, Aurora or your own picture as background.</span></div>
+  <div class="c"><i>05</i><b>Send from your phone</b><span>Paste a link on your phone, press one button on the TV.</span></div>
+  <div class="c"><i>06</i><b>You decide the network</b><span>Allow everything, only your servers, or nothing at all.</span></div>
+</div>
+<div class="shots" id="screens">
+  <img src="screenshots/browse-fanart-progress.jpg" alt="Large icons with watched percentages and fan art">
+  <img src="screenshots/player-bar.jpg" alt="Player bar">
+  <img src="screenshots/theme-midnight-tiles.jpg" alt="Midnight theme, Tiles view">
+</div>
+<h2 id="install">Install on your TV</h2>
+<div class="steps"><ol>
+  <li>Turn on Developer Mode on the TV and install <b>Apps2Samsung</b>.</li>
+  <li>In Apps2Samsung open <b>Settings, Installing, Your sources</b> and add <b>https://github.com/Megatro-nn/megatron-tizen-tv</b>.</li>
+  <li>Install Megatron from the list. It also lists in the main catalog once it is accepted there.</li>
+</ol></div>
+<div class="send"><div><b>Send a link to your TV</b><span>Paste a stream link on your phone and pull it on the TV with one button. No account.</span></div><a class="btn p" style="margin:0" href="send/">Open the send page</a></div>
+<div class="send"><div><b>Phone apps</b><span>Android app and iOS app (sideload) to send links to your TV, with share-sheet support.</span></div><a class="btn p" style="margin:0" href="https://github.com/Megatro-nn/megatrontizentv-send-to">Get the apps</a></div>
+</div>
+<footer><div class="wrap"><div><b>Megatron</b> is a fork of <b><a href="https://github.com/PatrickSt1991/tessel-tizen-tv">Tessel</a></b> by Patrick (@PatrickSt1991), MIT license.<br>Made by Megatro-nn. Not affiliated with Samsung.</div><a class="k" href="https://ko-fi.com/megatronazx">Support on Ko-fi</a></div></footer>
 <script>
 (function () {
-  'use strict';
-  var $ = function (id) { return document.getElementById(id); };
-  var NTFY = 'https://ntfy.sh';
-  var LS_CODE = 'vlctv_drop_code';
-
-  var fromHash = (location.hash || '').replace('#', '').trim();
-  var saved = '';
-  try { saved = localStorage.getItem(LS_CODE) || ''; } catch (e) {}
-  var initial = fromHash || saved;
-  if (initial) $('code').value = initial;
-
-  function persist(code) { try { localStorage.setItem(LS_CODE, code); } catch (e) {} }
-  function setStatus(text, kind) { var el = $('status'); el.textContent = text || ''; el.className = kind || ''; }
-
-  $('savecode').addEventListener('click', function () {
-    var c = ($('code').value || '').trim();
-    if (!c) { $('code').focus(); return; }
-    persist(c); setStatus('Code saved', 'ok');
+  var b = document.getElementById('theme'), root = document.documentElement;
+  function label() { b.textContent = root.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark'; }
+  b.addEventListener('click', function () {
+    var n = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', n);
+    try { localStorage.setItem('mg_theme', n); } catch (e) {}
+    label();
   });
-
-  function send() {
-    var code = ($('code').value || '').trim();
-    var url  = ($('url').value || '').trim();
-    if (!code) { setStatus('Enter the pairing code first', 'bad'); $('code').focus(); return; }
-    if (!url)  { setStatus('Paste a URL first', 'bad'); $('url').focus(); return; }
-    persist(code); setStatus('Sending\u2026', ''); $('send').disabled = true;
-    fetch(NTFY + '/' + encodeURIComponent('megatron-' + code), {
-      method: 'POST', body: url, headers: { 'Title': 'Megatron URL' }
-    })
-    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status);
-      setStatus('Sent \u2014 now press \u201CGet URL from device\u201D on the TV', 'ok'); })
-    .catch(function (e) { setStatus('Failed to send (' + e.message + ')', 'bad'); })
-    .then(function () { $('send').disabled = false; });
-  }
-  $('send').addEventListener('click', send);
-  $('url').addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
-
-  var qUrl = new URLSearchParams(location.search).get('url');
-  if (qUrl) $('url').value = qUrl;
+  label();
 })();
 </script>
 </body>

@@ -105,6 +105,7 @@ Most docs come from Tessel and still say "Tessel"; the instructions apply to Meg
 - [Playback notes](docs/PLAYBACK-NOTES.md) — files the TV can't decode, 5.1 that comes out as stereo
 - [Transcode server](transcode-server/README.md)
 - [Cast from another device](docs/SEND-URL-FROM-DEVICE.md)
+- [Megatron Send, phone apps for Android and iOS](https://github.com/Megatro-nn/megatrontizentv-send-to)
 - [Files onto the USB stick from your PC](docs/REMOTE.md)
 - [Reading the app's log](docs/DEBUG-LOG.md)
 - [Why a web app and not native](docs/WHY-WEB-APP.md)
