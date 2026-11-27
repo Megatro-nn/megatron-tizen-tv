@@ -96,7 +96,7 @@ Requires a Samsung Tizen TV (2017 or later; SMB, DLNA and WebDAV need Tizen 4.0+
 bash tizen-app/build.sh      # unsigned .wgt in dist/
 ```
 
-Needs Node.js and a Bash shell (Git Bash on Windows). GitHub Actions builds and publishes a release on every merge to `main`, named after the `version` in `tizen-app/config.xml`; bump it for every change under `tizen-app/`.
+Needs Node.js and a Bash shell (Git Bash on Windows). Releases are published by hand; the version lives in `tizen-app/config.xml`.
 
 ## Docs
 
