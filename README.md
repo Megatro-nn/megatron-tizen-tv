@@ -130,6 +130,7 @@ Done already: the [Megatron Send apps](https://github.com/Megatro-nn/megatrontiz
 Still ideas:
 - Settings backup and restore as one file from the phone page.
 - An iOS Shortcut for the Share menu.
+- A simpler way to share the TV app's debug log (today: Settings, Debug logging, save it to USB or an SMB share). The phone apps already have Share log and Copy log buttons.
 
 ## Translations
 
