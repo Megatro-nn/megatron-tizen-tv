@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Megatron</title>
+<link rel="stylesheet" href="css/style.css">
+
+<style>body{background:linear-gradient(135deg,#3b5a3a,#8a6a3a 50%,#1d2b4a)!important}.view:not(#view-player){display:none!important}#track-menu{max-height:calc(100vh - 200px)}</style></head>
+<body>
+<div id="splash" aria-hidden="true"><img src="logo-mark.png" alt=""><span>Megatron</span></div>
+
+<!-- AVPlay needs an OBJECT element of type "video/mp4" as its render target -->
+<object id="player-object" type="application/avplayer"></object>
+
+<!-- HTML5 video — used for local file:// URLs because AVPlay's local-file
+     pipeline is broken on Samsung TV 5.0 (opens the file, reports PLAYING,
+     never decodes a frame).  The WebView's chromium media stack handles
+     file:// just fine. -->
+<video id="html5-video" playsinline></video>
+
+<!-- Subtitle overlay — AVPlay doesn't auto-render text subs (TEXT/SUBTITLE
+     tracks).  It fires onsubtitlechange(duration, text, ...) and we paint
+     the text here. -->
+<div id="subtitle-overlay" class="hidden"></div>
+
+<!-- ── Home view ─────────────────────────────────────────────────────── -->
+<!-- Background layer.  It must come AFTER the player <object> and the <video>:
+     the TV cuts a see-through hole where those sit, and anything painted before
+     them in the page is cut out with it (that is what made it show black). -->
+<div id="app-bg" aria-hidden="true"><div class="bg-img"></div><div class="bg-dim"></div></div>
+
+<section id="view-home" class="view" data-remember-focus>
+    <header class="brand">
+        <img class="app-icon" src="logo-mark.png" alt="">
+        <h1>Megatron</h1>
+    </header>
+
+    <nav class="home-tiles">
+        <!-- Recently Played is intentionally the leftmost tile so the D-pad
+             lands on it first — the common return-visit action is "resume
+             what I was watching", not "browse from scratch" (issue #56).
+             Settings can hide it (issue #142); the D-pad then lands on
+             Favorites. -->
+        <button class="tile" data-action="browse-recent" data-focus>
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.4 2"/></svg></div>
+            <div class="tile-label" data-i18n="home.recent">Recently Played</div>
+            <div class="tile-sub" data-i18n="home.recentSub">Quick access to past media</div>
+        </button>
+        <button class="tile" data-action="browse-favorites">
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.6-4.7-9.7-9.4C.8 8.2 2.9 5 6.2 5c2 0 3.6 1 4.8 2.7C12.2 6 13.8 5 15.8 5c3.3 0 5.4 3.2 3.9 6.6C19.6 16.3 12 21 12 21z"/></svg></div>
+            <div class="tile-label" data-i18n="home.favorites">Favorites</div>
+            <div class="tile-sub" data-i18n="home.favoritesSub">Folders you pinned</div>
+        </button>
+        <button class="tile" data-action="open-url">
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.7 3.9 5.7 3.9 9s-1.3 6.3-3.9 9c-2.6-2.7-3.9-5.7-3.9-9S9.4 5.7 12 3z"/></svg></div>
+            <div class="tile-label" data-i18n="home.url">Open Network Stream</div>
+            <div class="tile-sub">HTTP · HLS · DASH · RTSP · RTMP</div>
+        </button>
+        <button class="tile" data-action="browse-usb">
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><rect x="7" y="10" width="10" height="12" rx="2.2"/><path d="M9 10V3.5h6V10M10.8 6.2v1.6M13.2 6.2v1.6"/></svg></div>
+            <div class="tile-label" data-i18n="home.usb">Browse USB Drive</div>
+            <div class="tile-sub" data-i18n="home.usbSub">Local files on connected storage</div>
+        </button>
+        <!-- SMB shares, DLNA media servers and WebDAV servers share one
+             tile (js/servers.js): three tiles made eight in a row. -->
+        <button class="tile" data-action="browse-servers">
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><rect x="3" y="4" width="18" height="6.5" rx="1.8"/><rect x="3" y="13.5" width="18" height="6.5" rx="1.8"/><path d="M7 7.2h.01M7 16.8h.01M12 10.5v3"/></svg></div>
+            <div class="tile-label" data-i18n="home.servers">Servers</div>
+            <div class="tile-sub" data-i18n="home.serversSub">SMB, WebDAV and DLNA</div>
+        </button>
+        <button class="tile" data-action="open-settings">
+            <div class="tile-icon"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></svg></div>
+            <div class="tile-label" data-i18n="home.settings">Settings</div>
+            <div class="tile-sub" data-i18n="home.settingsSub">Preferences &amp; TV info</div>
+        </button>
+    </nav>
+
+    <footer class="hint">
+        <span class="key">↑↓←→</span> <span data-i18n="hint.navigate">navigate</span>
+        <span class="key">OK</span> <span data-i18n="hint.select">select</span>
+        <span class="key">RETURN</span> <span data-i18n="hint.exit">exit app</span>
+    </footer>
+</section>
+
+<!-- ── URL input view ────────────────────────────────────────────────── -->
+<section id="view-url" class="view hidden">
+    <header class="brand small">
+        <img class="app-icon" src="logo-mark.png" alt="">
+        <h1 data-i18n="home.url">Open Network Stream</h1>
+    </header>
+
+    <div class="url-input-wrap">
+        <label for="url-input" data-i18n="url.label">Stream URL or file path</label>
+        <input id="url-input" type="text" inputmode="url"
+               placeholder="rtsp://… · https://…/playlist.m3u8 · file:///opt/usr/media/…"
+               data-focus>
+    </div>
+
+    <div class="actions">
+        <button class="btn primary" data-action="open-current-url" data-i18n="common.play">Play</button>
+        <button class="btn ghost"   data-action="save-current-url" data-i18n="saved.save">☆ Save</button>
+        <button class="btn ghost"   data-action="fetch-remote-url" data-i18n="url.fromDevice">📲 Get URL from device</button>
+        <!-- No Cancel: the remote's Back key does that (issue #126). -->
+    </div>
+
+    <!-- The user's own saved streams (issue #119).  Each is a chip that plays
+         it and a ⋯ chip beside it for rename / move / remove; hidden while
+         the list is empty. -->
+    <div class="presets saved-streams hidden" id="saved-streams">
+        <div class="presets-label" data-i18n="saved.title">Saved streams</div>
+        <div id="saved-streams-list" class="saved-streams-list"></div>
+    </div>
+
+    <!-- Name and URL of a stream being saved or edited.  While it's open the
+         rest of the screen steps aside (#view-url.editing). -->
+    <div class="saved-edit" id="saved-edit">
+        <div class="url-input-wrap">
+            <label for="saved-name" data-i18n="saved.name">Name</label>
+            <input id="saved-name" type="text">
+        </div>
+        <div class="url-input-wrap">
+            <label for="saved-url" data-i18n="url.label">Stream URL or file path</label>
+            <input id="saved-url" type="text" inputmode="url">
+        </div>
+        <div class="actions">
+            <button class="btn primary" data-action="saved-edit-done" data-i18n="saved.done">Save</button>
+            <button class="btn ghost"   data-action="saved-edit-cancel" data-i18n="common.cancel">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Sample inputs sit below the primary actions so the remote lands on
+         Play first; the chips are a secondary, try-it convenience. -->
+    <div class="presets">
+        <div class="presets-label" data-i18n="url.samples">Or try a sample stream</div>
+        <button class="preset" data-url="http://vjs.zencdn.net/v/oceans.mp4">Oceans (MP4, short)</button>
+        <button class="preset" data-url="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8">HLS test (Mux)</button>
+        <button class="preset" data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">Big Buck Bunny (MP4)</button>
+        <button class="preset" data-url="https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8">Apple BipBop (HLS, 16:9)</button>
+        <button class="preset" data-url="https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd">DASH test (Akamai)</button>
+        <button class="preset" data-url="rtsp://9627b0bf2a7b.entrypoint.cloud.wowza.com:1935/app-p5260J38/66abe4b9_stream1">My Wowza RTSP</button>
+        <button class="preset" data-url="rtsp://170.93.143.139:554/rtplive/470011e600ef003a004ee33696235daa">FAA RTSP (public)</button>
+    </div>
+
+    <p class="url-drop-hint" data-i18n-fmt="url.dropHint">Paste a URL from your phone, tablet or laptop — pair once under <b data-i18n="home.settings" data-slot="0">Settings</b>.</p>
+</section>
+
+<!-- ── File browser view ─────────────────────────────────────────────── -->
+<section id="view-browse" class="view hidden">
+    <header class="brand small">
+        <img class="app-icon" src="logo-mark.png" alt="">
+        <h1 id="browse-title" data-i18n="browse.usbTitle">USB Drive</h1>
+    </header>
+    <!-- Item count and folder size, top-left corner of a USB folder. -->
+    <div class="browse-count" id="browse-count"></div>
+
+    <div class="browse-path"  id="browse-path">/</div>
+    <!-- Only while a playlist is listed (issue #122). -->
+    <div class="playlist-filter hidden" id="playlist-filter-wrap">
+        <input id="playlist-filter" type="text" data-i18n-placeholder="playlist.filter" placeholder="Filter channels…">
+    </div>
+    <!-- Sort / View buttons above a USB folder, like the Windows command bar. -->
+    <div class="browse-bar" id="browse-bar">
+        <button class="bar-btn" id="bar-sort" data-action="bar-sort"></button>
+        <button class="bar-btn" id="bar-view" data-action="bar-view"></button>
+    </div>
+    <!-- Column titles; shown only in the Details view. -->
+    <div class="browse-head" id="browse-head"></div>
+    <ul    class="browse-list" id="browse-list"></ul>
+    <!-- Details of the highlighted file or folder. -->
+    <div class="browse-info" id="browse-info"></div>
+
+    <footer class="hint">
+        <span class="key">OK</span> <span data-i18n="hint.open">open</span>
+        <span class="key">RETURN</span> <span data-i18n="hint.up">up</span>
+        <span class="key">PLAY</span> <span data-i18n="hint.openAsMedia">open as media</span>
+        <span class="hidden" id="hint-menu"><span class="key">OK</span> <span data-i18n="hint.menu">hold for menu</span></span>
+        <span class="hidden" id="hint-save"><span class="key">►</span> <span data-i18n="hint.saveChannel">save / unsave</span></span>
+        <span class="hidden" id="hint-fav"><span class="key">►</span> <span data-i18n="hint.favorite">pin / unpin folder</span></span>
+        <span class="hidden" id="hint-forget"><span class="key">◄</span> <span data-i18n="hint.forgetWatched">forget watched</span></span>
+    </footer>
+</section>
+
+<!-- ── Picture viewer (js/viewer.js) ────────────────────────────────── -->
+<section id="view-image" class="view hidden">
+    <img id="image-el" alt="">
+    <div class="image-status hidden" id="image-status"></div>
+    <div class="image-bar" id="image-bar">
+        <div class="image-caption">
+            <span id="image-name"></span>
+            <span id="image-info" class="image-info"></span>
+        </div>
+        <div class="image-keys">
+            <span class="key">←→</span> <span data-i18n="hint.prevNext">previous / next</span>
+            <span class="key">OK</span> <span data-i18n="hint.slideshow">slideshow</span>
+            <span class="key">↑↓</span> <span data-i18n="hint.rotate">rotate</span>
+            <span class="key">RETURN</span> <span data-i18n="hint.back">back</span>
+        </div>
+    </div>
+</section>
+
+<!-- ── Text viewer (js/viewer.js) ───────────────────────────────────── -->
+<section id="view-text" class="view hidden">
+    <div class="text-head">
+        <span id="text-name" class="text-name"></span>
+        <span id="text-info" class="text-info"></span>
+    </div>
+    <div class="text-body" id="text-body"><pre id="text-pre"></pre></div>
+    <footer class="hint">
+        <span class="key">↑↓</span> <span data-i18n="hint.scroll">scroll</span>
+        <span class="key">←→</span> <span data-i18n="hint.page">page</span>
+        <span class="key">0–9</span> <span data-i18n="hint.jump">jump</span>
+        <span class="key">RETURN</span> <span data-i18n="hint.back">back</span>
+    </footer>
+</section>
+
+<!-- ── Player view ───────────────────────────────────────────────────── -->
+<section id="view-player" class="view hidden">
+    <!-- Music has no picture of its own: without this card the screen is
+         just black once the OSD fades (issue #105). -->
+    <div class="audio-card hidden" id="audio-card">
+        <img class="audio-art hidden" id="audio-art" alt="">
+        <div class="audio-note" id="audio-note">♪</div>
+        <div class="audio-title" id="audio-title"></div>
+        <div class="audio-sub" id="audio-sub"></div>
+    </div>
+
+    <!-- Top bar: title -->
+    <div class="osd osd-top hidden" id="osd-top">
+        <span id="osd-title" data-i18n="common.loading">Loading…</span>
+        <span class="osd-clock" id="osd-clock"></span>
+    </div>
+
+    <!-- Center spinner while opening -->
+    <div class="spinner hidden" id="spinner">
+        <div class="spinner-ring"></div>
+        <div class="spinner-text" data-i18n="player.opening">Opening stream…</div>
+    </div>
+
+    <!-- Center error banner -->
+    <div class="error-overlay hidden" id="error-overlay">
+        <div class="error-icon">!</div>
+        <div class="error-title" id="error-title" data-i18n="player.error">Playback error</div>
+        <div class="error-hint"  id="error-hint"></div>
+        <button class="btn primary" data-action="back-home" data-i18n="player.backHome">Back to Home</button>
+    </div>
+
+    <!-- Bottom OSD: progress + controls -->
+    <div class="osd osd-bottom hidden" id="osd-bottom">
+        <div class="time">
+            <span id="time-current">00:00</span>
+            <span id="time-scrub-delta" class="scrub-delta hidden"></span>
+            <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            <button class="time-btn" data-action="toggle-time-mode" id="time-duration">00:00</button>
+        </div>
+        <div class="controls">
+            <div class="ctrl-side"></div>
+            <div class="ctrl-main">
+                <button class="ctrl" data-action="prev" id="btn-prev" title="Restart / Previous" data-i18n-title="player.prev"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.2v13.6L9.4 12z"/></svg></button>
+                <button class="ctrl" data-action="rewind"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 6v12L3 12zM21 6v12l-8.5-6z"/></svg></button>
+                <button class="ctrl big" data-action="play-pause" id="btn-playpause" data-focus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></button>
+                <button class="ctrl" data-action="forward"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 6v12L21 12zM3 6v12l8.5-6z"/></svg></button>
+                <button class="ctrl" data-action="next" id="btn-next" title="Next" data-i18n-title="player.next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 5H18v14h-2.2zM5 5.2v13.6L14.6 12z"/></svg></button>
+            </div>
+            <div class="ctrl-side right">
+                <button class="ctrl" data-action="open-track-menu" id="btn-cc">CC</button>
+                <button class="ctrl" data-action="open-settings-panel" id="btn-gear" title="Player settings" data-i18n-title="panel.title"><svg viewBox="0 0 24 24" aria-hidden="true" class="stk"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></svg></button>
+            </div>
+        </div>
+    </div>
+    <!-- One panel, four tabs: subtitles, audio, video, info.  The lists scroll inside
+         the body: a Netflix-style rip can carry 20+ subtitle tracks. -->
+    <div class="track-menu hidden" id="track-menu" data-tab="subs">
+        <div class="panel-tabs" id="panel-tabs">
+            <button class="panel-tab" data-action="panel-tab" data-tab="subs"  data-i18n="tab.subs">Subtitles</button>
+            <button class="panel-tab" data-action="panel-tab" data-tab="audio" data-i18n="tab.audio">Audio</button>
+            <button class="panel-tab" data-action="panel-tab" data-tab="video" data-i18n="tab.video">Video</button>
+            <button class="panel-tab" data-action="panel-tab" data-tab="info"  data-i18n="info.title">File info</button>
+        </div>
+        <div class="track-menu-body" id="track-menu-body">
+            <div class="track-section" data-tab="audio">
+                <h3 id="audio-tracks-title" data-i18n="tracks.audio">Audio</h3>
+                <ul id="audio-tracks"></ul>
+            </div>
+            <div class="track-section" data-tab="subs">
+                <h3 id="subtitle-tracks-title" data-i18n="tracks.subtitle">Subtitle</h3>
+                <ul id="subtitle-tracks"></ul>
+            </div>
+            <!-- Subtitle appearance without leaving the player (issue #149): the same
+                 pickers as Settings → Subtitle appearance. -->
+            <div class="track-section" data-tab="subs">
+                <h3 data-i18n="tracks.style">Subtitle style</h3>
+                <ul id="subtitle-style"></ul>
+            </div>
+            <div class="track-section" data-tab="video">
+                <h3 data-i18n="tab.playback">Playback</h3>
+                <ul id="video-rows"></ul>
+            </div>
+            <div class="track-section file-info" data-tab="info">
+                <dl id="file-info-list"></dl>
+            </div>
+        </div>
+        <button class="btn ghost" data-action="close-track-menu" data-focus data-i18n="common.close">Close</button>
+    </div>
+    <!-- 15 seconds before the end of an episode that has a next one. -->
+    <div class="next-up hidden" id="next-up">
+        <div class="nu-text" id="next-up-text"></div>
+        <button class="btn primary" data-action="next-now" data-i18n="player.skip">Skip</button>
+    </div>
+</section>
+
+<!-- ── Settings view ─────────────────────────────────────────────────── -->
+<section id="view-settings" class="view hidden">
+    <header class="brand small">
+        <img class="app-icon" src="logo-mark.png" alt="">
+        <h1 data-i18n="home.settings">Settings</h1>
+    </header>
+
+    <div class="settings-content">
+        <h2 class="settings-section-title" data-i18n="settings.secAppearance">Appearance</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-theme" data-focus>
+                <div class="settings-label" data-i18n="settings.theme">Theme</div>
+                <div class="settings-value" id="setting-theme-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-accent">
+                <div class="settings-label" data-i18n="settings.accent">Accent colour</div>
+                <div class="settings-value" id="setting-accent-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-background">
+                <div class="settings-label" data-i18n="settings.background">Background</div>
+                <div class="settings-value" id="setting-background-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-fanart">
+                <div class="settings-label" data-i18n="settings.fanart">Fanart behind folders</div>
+                <div class="settings-value" id="setting-fanart-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-text-size">
+                <div class="settings-label" data-i18n="settings.textSize">File list text size</div>
+                <div class="settings-value" id="setting-text-size-value"></div>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.secGeneral">General</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-ui-lang">
+                <div class="settings-label" data-i18n="settings.uiLang">App language</div>
+                <div class="settings-value" id="setting-ui-lang-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-start-screen">
+                <div class="settings-label" data-i18n="settings.startScreen">Start screen</div>
+                <div class="settings-value" id="setting-start-screen-value">Home screen</div>
+            </button>
+            <button class="settings-row" data-action="setting-recent">
+                <div class="settings-label" data-i18n="home.recent">Recently Played</div>
+                <div class="settings-value" id="setting-recent-value">On</div>
+            </button>
+            <button class="settings-row" data-action="setting-recent-clear">
+                <span class="settings-label" data-i18n="settings.recentClear">Clear Recently Played</span>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.secBrowsing">Browsing</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-browse-filter">
+                <div class="settings-label" data-i18n="settings.browseFilter">File browser shows</div>
+                <div class="settings-value" id="setting-browse-filter-value">All files</div>
+            </button>
+            <button class="settings-row" data-action="setting-show-hidden">
+                <div class="settings-label" data-i18n="settings.showHidden">Show hidden files</div>
+                <div class="settings-value" id="setting-show-hidden-value">Off</div>
+            </button>
+            <button class="settings-row" data-action="setting-poster-cache">
+                <div class="settings-label" data-i18n="settings.posterCache">Poster cache</div>
+                <div class="settings-value" id="setting-poster-cache-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-folder-play">
+                <div class="settings-label" data-i18n="settings.folderPlayRows">Play all / Shuffle all in folders</div>
+                <div class="settings-value" id="setting-folder-play-value">On</div>
+            </button>
+            <button class="settings-row" data-action="setting-slideshow-interval">
+                <div class="settings-label" data-i18n="settings.slideshow">Slideshow interval</div>
+                <div class="settings-value" id="setting-slideshow-interval-value">5 seconds</div>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.secPlayback">Playback</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-resume-mode">
+                <div class="settings-label" data-i18n="settings.resume">Resume playback</div>
+                <div class="settings-value" id="setting-resume-mode-value">Ask</div>
+            </button>
+            <button class="settings-row" data-action="setting-auto-play">
+                <div class="settings-label" data-i18n="settings.autoPlay">Auto-play next file</div>
+                <div class="settings-value" id="setting-auto-play-value">On</div>
+            </button>
+            <button class="settings-row" data-action="setting-repeat-mode">
+                <div class="settings-label" data-i18n="settings.repeatMode">Repeat mode</div>
+                <div class="settings-value" id="setting-repeat-mode-value">Off</div>
+            </button>
+            <button class="settings-row" data-action="setting-shuffle">
+                <div class="settings-label" data-i18n="settings.shuffle">Shuffle playlist</div>
+                <div class="settings-value" id="setting-shuffle-value">Off</div>
+            </button>
+            <button class="settings-row" data-action="setting-aspect-mode">
+                <div class="settings-label" data-i18n="settings.aspect">Video aspect ratio</div>
+                <div class="settings-value" id="setting-aspect-mode-value">Fit screen (keep black bars)</div>
+            </button>
+            <button class="settings-row" data-action="setting-time-mode">
+                <div class="settings-label" data-i18n="settings.timeMode">Time shown on the bar</div>
+                <div class="settings-value" id="setting-time-mode-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-skip-short">
+                <div class="settings-label" data-i18n="settings.skipShort">Skip length (◄ ►)</div>
+                <div class="settings-value" id="setting-skip-short-value"></div>
+            </button>
+            <button class="settings-row" data-action="setting-skip-long">
+                <div class="settings-label" data-i18n="settings.skipLong">Skip length (FF / RW)</div>
+                <div class="settings-value" id="setting-skip-long-value"></div>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.secAudioSub">Audio and subtitles</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-audio-lang">
+                <div class="settings-label" data-i18n="settings.audioLang">Preferred audio language</div>
+                <div class="settings-value" id="setting-audio-lang-value">Auto</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-lang">
+                <div class="settings-label" data-i18n="settings.subtitleLang">Preferred subtitle language</div>
+                <div class="settings-value" id="setting-subtitle-lang-value">Off</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-lang2">
+                <div class="settings-label" data-i18n="settings.subtitleLang2">Second subtitle language</div>
+                <div class="settings-value" id="setting-subtitle-lang2-value">None</div>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.subAppearance">Subtitle appearance</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-subtitle-size">
+                <div class="settings-label" data-i18n="settings.subSize">Subtitle size</div>
+                <div class="settings-value" id="setting-subtitle-size-value">Medium</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-font">
+                <div class="settings-label" data-i18n="settings.subFont">Subtitle font</div>
+                <div class="settings-value" id="setting-subtitle-font-value">Sans-serif</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-color">
+                <div class="settings-label" data-i18n="settings.subColor">Subtitle colour</div>
+                <div class="settings-value" id="setting-subtitle-color-value">White</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-weight">
+                <div class="settings-label" data-i18n="settings.subWeight">Subtitle weight</div>
+                <div class="settings-value" id="setting-subtitle-weight-value">Normal</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-position">
+                <div class="settings-label" data-i18n="settings.subPosition">Subtitle position</div>
+                <div class="settings-value" id="setting-subtitle-position-value">Bottom</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-bg">
+                <div class="settings-label" data-i18n="settings.subBg">Subtitle background</div>
+                <div class="settings-value" id="setting-subtitle-bg-value">None</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-outline">
+                <div class="settings-label" data-i18n="settings.subOutline">Subtitle outline</div>
+                <div class="settings-value" id="setting-subtitle-outline-value">Medium</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-shadow">
+                <div class="settings-label" data-i18n="settings.subShadow">Subtitle shadow</div>
+                <div class="settings-value" id="setting-subtitle-shadow-value">Soft</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-opacity">
+                <div class="settings-label" data-i18n="settings.subOpacity">Subtitle opacity</div>
+                <div class="settings-value" id="setting-subtitle-opacity-value">100%</div>
+            </button>
+            <button class="settings-row" data-action="setting-subtitle-looks">
+                <div class="settings-label" data-i18n="sub.preset.title">Subtitle looks</div>
+                <div class="settings-value" data-i18n="sub.preset.hint">Movie, Large and bold, Minimal…</div>
+            </button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.secNetwork">Network</h2>
+        <div class="settings-group">
+            <button class="settings-row" data-action="setting-network">
+                <div class="settings-label" data-i18n="settings.network">Network access</div>
+                <div class="settings-value" id="setting-network-value">Servers you set up</div>
+            </button>
+        </div>
+
+        <button class="settings-section-toggle" data-toggle="grp-smb" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="smb.section">SMB network share</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-smb">
+            <button class="settings-row" id="smb-server"><div class="settings-label" data-i18n="smb.server">Server to edit</div><div class="settings-value" id="smb-server-val"></div></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.host">Server (IP/host)</span><input id="smb-host"   type="text"     placeholder="192.168.1.10"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.port">Port</span><input id="smb-port"   type="text"     inputmode="numeric" placeholder="445"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.share">Share</span><input id="smb-share"  type="text"     placeholder="Media"></label>
+            <button class="settings-row" id="smb-find-shares"><span class="settings-label" data-i18n="smb.findShares">Find shares on this server</span></button>
+            <button class="settings-row" id="smb-anon"><div class="settings-label" data-i18n="smb.guest">Guest (no login)</div><div class="settings-value" id="smb-anon-val">Off</div></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.user">Username</span><input id="smb-user"   type="text"     placeholder="guest"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.pass">Password</span><input id="smb-pass"   type="password"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.domain">Domain (optional)</span><input id="smb-domain" type="text"></label>
+            <button id="smb-save" class="settings-row"><span class="settings-label" data-i18n="smb.save">Save SMB server</span></button>
+            <button id="smb-remove" class="settings-row"><span class="settings-label" data-i18n="smb.removeServer">Remove this server</span></button>
+        </div>
+
+        <button class="settings-section-toggle" data-toggle="grp-dav" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="dav.section">WebDAV server</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-dav">
+            <button class="settings-row" id="dav-server"><div class="settings-label" data-i18n="smb.server">Server to edit</div><div class="settings-value" id="dav-server-val"></div></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dav.url">Address (URL)</span><input id="dav-url"  type="url"  placeholder="https://cloud.example.com/remote.php/dav/files/user/"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.user">Username</span><input id="dav-user" type="text"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="smb.pass">Password</span><input id="dav-pass" type="password"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dav.name">Name (optional)</span><input id="dav-name" type="text" placeholder="My Nextcloud"></label>
+            <button class="settings-row" id="dav-insecure"><div class="settings-label" data-i18n="dav.insecure">Accept a self-signed certificate</div><div class="settings-value" id="dav-insecure-val">Off</div></button>
+            <button id="dav-save" class="settings-row"><span class="settings-label" data-i18n="dav.save">Save WebDAV server</span></button>
+            <button id="dav-remove" class="settings-row"><span class="settings-label" data-i18n="smb.removeServer">Remove this server</span></button>
+        </div>
+
+        <button class="settings-section-toggle" data-toggle="grp-srv" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="srv.section">Transcode server</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-srv">
+            <div class="settings-row"><div class="settings-label" data-i18n="srv.status">Status</div><div class="settings-value" id="srv-status-val">Not paired</div></div>
+            <button id="srv-find" class="settings-row"><span class="settings-label" data-i18n="srv.find">Find server on my network</span></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="srv.address">Server address</span><input id="srv-addr" type="text" placeholder="192.168.1.20"></label>
+            <button id="srv-connect" class="settings-row"><span class="settings-label" data-i18n="srv.connect">Connect to this address</span></button>
+            <button id="srv-surround" class="settings-row"><div class="settings-label" data-i18n="srv.surround">Surround sound</div><div class="settings-value" id="srv-surround-val">—</div></button>
+            <button id="srv-smart" class="settings-row"><div class="settings-label" data-i18n="srv.smart">Smart routing (play compatible files directly)</div><div class="settings-value" id="srv-smart-val">Off</div></button>
+            <button id="srv-local" class="settings-row"><div class="settings-label" data-i18n="srv.local">Play USB files through the server</div><div class="settings-value" id="srv-local-val">Off</div></button>
+            <button id="srv-adopt" class="settings-row"><span class="settings-label" data-i18n="srv.adopt">Get share settings from the server</span></button>
+            <button id="srv-push" class="settings-row"><span class="settings-label" data-i18n="srv.push">Send my share settings to the server</span></button>
+            <button id="srv-pair" class="settings-row"><span class="settings-label" data-i18n="srv.pair">Pair with a code (needs internet)</span></button>
+            <button id="srv-unpair" class="settings-row"><span class="settings-label" data-i18n="srv.unpair">Remove transcode server</span></button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="cast.section">Cast from another device</h2>
+        <div class="support-block">
+            <div class="support-qr" id="pair-qr"></div>
+            <div class="support-text">
+                <div class="support-headline" data-i18n="cast.headline">Cast a link to your TV</div>
+                <div class="cast-hint">
+                    <span data-i18n="cast.scan">Scan the QR code to pair.</span><br>
+                    <span data-i18n-fmt="cast.orGoTo">Or go to <span class="pair-emph" id="pair-url" data-slot="0">…</span> and enter code <span class="pair-emph" id="pair-code" data-slot="1">…</span>.</span>
+                </div>
+            </div>
+        </div>
+
+        <button class="settings-section-toggle" data-toggle="grp-backup" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="backup.section">Backup</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-backup">
+            <button class="settings-row" id="backup-pass"><div class="settings-label" data-i18n="backup.passwords">Include SMB and WebDAV passwords (saved as plain text)</div><div class="settings-value" id="backup-pass-val">Off</div></button>
+            <button class="settings-row" id="backup-history"><div class="settings-label" data-i18n="backup.history">Include history and resume positions</div><div class="settings-value" id="backup-history-val">On</div></button>
+            <button id="backup-save" class="settings-row"><span class="settings-label" data-i18n="backup.save">Save backup to USB or an SMB share</span></button>
+            <button id="backup-restore" class="settings-row"><span class="settings-label" data-i18n="backup.restore">Restore backup from USB or an SMB share</span></button>
+        </div>
+
+        <button class="settings-section-toggle" data-toggle="grp-dbg" aria-expanded="false">
+            <span class="settings-section-title" data-i18n="dbg.section">Debug logging</span>
+            <span class="settings-section-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="settings-group is-collapsed" id="grp-dbg">
+            <button class="settings-row" id="dbg-enabled"><div class="settings-label" data-i18n="dbg.enabled">Send debug logs</div><div class="settings-value" id="dbg-enabled-val">Off</div></button>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dbg.host">Listener IP</span><input id="dbg-host" type="text" placeholder="192.168.1.50"></label>
+            <label class="settings-row settings-row-input"><span class="settings-label" data-i18n="dbg.port">Listener port</span><input id="dbg-port" type="text" placeholder="9999"></label>
+            <button id="dbg-save" class="settings-row"><span class="settings-label" data-i18n="dbg.save">Save debug settings</span></button>
+            <button id="dbg-export" class="settings-row"><span class="settings-label" data-i18n="dbg.export">Save debug log to USB or an SMB share</span></button>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="about.section">About Megatron</h2>
+        <div class="support-block">
+            <div class="support-qr" id="about-qr"></div>
+            <div class="support-text">
+                <div class="support-headline" data-i18n="about.headline">Megatron on GitHub</div>
+                <div class="cast-hint">
+                    <span data-i18n="about.scan">Scan the QR code for the project page, updates and help.</span><br>
+                    <span class="pair-emph" id="about-url"></span>
+                </div>
+            </div>
+        </div>
+
+        <h2 class="settings-section-title" data-i18n="settings.tvInfo">TV Information</h2>
+        <div class="tvinfo" id="tvinfo" data-i18n="common.loading">Loading…</div>
+    </div>
+</section>
+
+<!-- ── Generic picker overlay (used by Settings + future menus) ──────── -->
+<div class="picker hidden" id="picker">
+    <h2 id="picker-title" data-i18n="picker.default">Pick a value</h2>
+    <ul id="picker-options"></ul>
+    <div class="picker-custom hidden" id="picker-custom-row">
+        <input id="picker-custom" type="text" inputmode="numeric" data-i18n-placeholder="skip.customHint" placeholder="Seconds (1 to 600)">
+        <button class="btn primary" data-action="picker-custom-save" data-i18n="saved.done">Save</button>
+    </div>
+    <button class="btn ghost" data-action="close-picker" data-i18n="common.cancel">Cancel</button>
+</div>
+
+<!-- ── Mini-player: music playing on while browsing (issue #105) ───── -->
+<div class="mini-player hidden" id="mini-player">
+    <img class="mini-art hidden" id="mini-art" alt="">
+    <div class="mini-note" id="mini-note">♪</div>
+    <div class="mini-text">
+        <div class="mini-title" id="mini-title"></div>
+        <div class="mini-sub" id="mini-sub"></div>
+        <div class="mini-track"><div class="mini-fill" id="mini-fill"></div></div>
+        <div class="mini-keys">
+            <span class="key">INFO</span> <span data-i18n="hint.openPlayer">open player</span>
+            <span class="key">CH ±</span> <span data-i18n="hint.prevNext">previous / next</span>
+            <span class="key">■</span> <span data-i18n="hint.stop">stop</span>
+        </div>
+    </div>
+    <div class="mini-state" id="mini-state">▶</div>
+</div>
+
+<!-- ── Toast / status flash ──────────────────────────────────────────── -->
+<div id="toast" class="toast hidden"></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>window.onload=function(){var d=document;function q(i){return d.getElementById(i)}
+['view-player','osd-top','osd-bottom'].forEach(function(i){q(i).classList.remove('hidden')});d.body.classList.add('osd-up');
+q('osd-title').textContent='The.Expanse.S02E05.1080p.BluRay.x264.mkv';q('osd-clock').textContent='21:14  ·  ends at 22:02';
+q('time-current').textContent='00:21:40';q('time-duration').textContent='-00:26:12';q('progress-fill').style.width='45%';
+q('track-menu').classList.remove('hidden');q('track-menu').setAttribute('data-tab','subs');
+q('subtitle-tracks').innerHTML='<li>Off</li><li class="active">[AR] movie.ar.srt</li><li>[EN] movie.en.srt</li>';
+var rows=[['Delay','◄ +0.5 s ►  step 0.5 s','delay-row focused'],['Reset delay',null,''],['Text encoding','Auto',''],['Subtitle looks',null,''],['Subtitle size','Large',''],['Subtitle outline','Medium',''],['Subtitle shadow','Soft',''],['Subtitle opacity','100%','']];
+q('subtitle-style').innerHTML=rows.map(function(r){return '<li class="style-row '+r[2]+'"><span>'+r[0]+'</span>'+(r[1]?'<span class="style-value">'+r[1]+'</span>':'')+'</li>'}).join('');
+}</script></body>
+</html>

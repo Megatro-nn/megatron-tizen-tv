@@ -1,0 +1,165 @@
+'use strict';
+
+var assert = require('assert');
+var test = require('node:test');
+var Settings = require('../../tizen-app/js/settings.js');
+var LanguageList = Settings.LanguageList;
+var AspectRatio  = Settings.AspectRatio;
+
+function codes(list) { return list.map(function (l) { return l.code; }); }
+
+/* ── The picker lists ─────────────────────────────────────────────────── */
+
+test('Vietnamese is offered for both audio and subtitles', function () {
+    assert.ok(codes(LanguageList.forAudio()).indexOf('vi') >= 0);
+    assert.ok(codes(LanguageList.forSubtitle()).indexOf('vi') >= 0);
+    assert.strictEqual(LanguageList.nameFor('vi'), 'Tiếng Việt');
+});
+
+test('the subtitle list keeps Off in front of the languages', function () {
+    assert.strictEqual(LanguageList.forSubtitle()[0].code, 'off');
+    assert.strictEqual(LanguageList.nameFor('off'), 'Off');
+});
+
+/* ── matchScore ───────────────────────────────────────────────────────── */
+
+test('a language tag wins outright, in either ISO spelling', function () {
+    assert.strictEqual(LanguageList.matchScore('vi', 'vie', 'Subtitle 3'), 100);
+    assert.strictEqual(LanguageList.matchScore('vi', 'vi',  'Subtitle 3'), 100);
+    assert.strictEqual(LanguageList.matchScore('vi', 'vi-VN', 'Subtitle 3'), 100);
+    assert.strictEqual(LanguageList.matchScore('de', 'ger', 'Track 2'), 100);
+    assert.strictEqual(LanguageList.matchScore('nl', 'dut', 'Track 2'), 100);
+});
+
+test('untagged tracks match on the spelled-out name', function () {
+    assert.ok(LanguageList.matchScore('vi', '', 'Vietnamese (SDH)') > 0);
+    assert.ok(LanguageList.matchScore('vi', '', 'Tiếng Việt') > 0);
+    assert.ok(LanguageList.matchScore('zh', '', '简体中文') > 0);
+    assert.ok(LanguageList.matchScore('ko', '', 'Korean forced') > 0);
+});
+
+test('a bracketed code counts, and beats a bare word match', function () {
+    var bracketed = LanguageList.matchScore('fr', '', 'Subtitle [fre]');
+    var word      = LanguageList.matchScore('fr', '', 'French subtitles');
+    assert.ok(bracketed > 0 && word > 0);
+    assert.ok(bracketed > word);
+});
+
+test('a two-letter code matches only as its own word', function () {
+    // The bug this guards: "Movie.2019.1080p" is not a Vietnamese track.
+    assert.strictEqual(LanguageList.matchScore('vi', '', 'Movie.2019.1080p'), 0);
+    assert.ok(LanguageList.matchScore('vi', '', 'Show.S01E02.vi.srt') > 0);
+});
+
+test('a mismatched language scores nothing', function () {
+    assert.strictEqual(LanguageList.matchScore('vi', 'eng', 'English'), 0);
+    assert.strictEqual(LanguageList.matchScore('en', 'vie', 'Tiếng Việt'), 0);
+});
+
+test('no preference and Off never match a track', function () {
+    assert.strictEqual(LanguageList.matchScore('',    'vie', 'Vietnamese'), 0);
+    assert.strictEqual(LanguageList.matchScore('off', 'vie', 'Vietnamese'), 0);
+});
+
+/* ── Aspect modes ─────────────────────────────────────────────────────── */
+
+test('fit is the default aspect mode and keeps the letterbox', function () {
+    var fit = AspectRatio.find('fit');
+    assert.strictEqual(AspectRatio.forList()[0].code, 'fit');
+    assert.strictEqual(fit.av, 'PLAYER_DISPLAY_MODE_LETTER_BOX');
+    assert.strictEqual(fit.fit, 'contain');
+});
+
+test('fill crops instead of distorting, stretch distorts', function () {
+    assert.strictEqual(AspectRatio.find('fill').av, 'PLAYER_DISPLAY_MODE_CROPPED_FULL');
+    assert.strictEqual(AspectRatio.find('fill').fit, 'cover');
+    assert.strictEqual(AspectRatio.find('stretch').av, 'PLAYER_DISPLAY_MODE_FULL_SCREEN');
+    assert.strictEqual(AspectRatio.find('stretch').fit, 'fill');
+});
+
+test('the list holds only modes AVPlay can actually carry out', function () {
+    /* Zoom and crop modes were offered for two releases and never moved a
+     * pixel: cropping bars baked into the frames needs a display rect bigger
+     * than the screen and centred on it, whose origin is negative, and
+     * setDisplayRect rejects a negative parameter.  They are gone rather
+     * than left on the list looking broken — every mode here is one of the
+     * three display methods the firmware really has. */
+    assert.deepStrictEqual(AspectRatio.forList().map(function (m) { return m.code; }),
+        ['fit', 'fill', 'stretch']);
+    AspectRatio.forList().forEach(function (m) {
+        assert.ok(/^PLAYER_DISPLAY_MODE_/.test(m.av), m.code + ' has no display method');
+        assert.strictEqual(m.zoom, undefined, m.code + ' still carries a zoom factor');
+        assert.strictEqual(m.targetDar, undefined, m.code + ' still carries a crop target');
+    });
+});
+
+test('a mode saved by an older build is not treated as current', function () {
+    // 1.4.0 could persist any of these; find() has to land on Fit and
+    // isKnown() has to let app.js write the setting back.
+    ['zoom110', 'zoom125', 'crop20', 'crop239', 'nonsense', '', undefined].forEach(function (code) {
+        assert.strictEqual(AspectRatio.isKnown(code), false, code + ' should be unknown');
+        assert.strictEqual(AspectRatio.find(code).code, 'fit');
+    });
+    assert.strictEqual(AspectRatio.isKnown('fill'), true);
+});
+
+test('an unknown mode falls back to fit, and next() cycles', function () {
+    assert.strictEqual(AspectRatio.find('nonsense').code, 'fit');
+    var seen = {}, code = 'fit';
+    for (var i = 0; i < AspectRatio.forList().length; i++) {
+        assert.ok(!seen[code], 'cycle repeats before visiting every mode');
+        seen[code] = true;
+        code = AspectRatio.next(code);
+    }
+    assert.strictEqual(code, 'fit', 'cycle returns to the start');
+    // Every mode carries an OSD label short enough for the round button.
+    AspectRatio.forList().forEach(function (m) {
+        assert.ok(m.short.length <= 4, m.code + ' label too long: ' + m.short);
+    });
+});
+
+/* ── pickAutoSubtitle: what 'Auto (file default)' loads from the folder ── */
+
+test('Auto takes the subtitle file with no language tag first (issue #165)', function () {
+    var bare = { lang: '',   name: 'Film.txt' };
+    var pl   = { lang: 'pl', name: 'Film.pl.txt' };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([pl, bare], 'en'), bare);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([bare], ''), bare);
+});
+
+test('Auto takes the file tagged with the app language when there is no untagged one', function () {
+    var en = { lang: 'en', name: 'Film.en.srt' };
+    var pl = { lang: 'pl', name: 'Film.pl.srt' };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([en, pl], 'pl-PL'), pl);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([en, pl], 'en'), en);
+    // The ISO 639-2 spelling in the file name still counts as that language.
+    var pol = { lang: 'pol', name: 'Film.pol.srt' };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([en, pol], 'pl-PL'), pol);
+});
+
+test('Auto takes a lone tagged file whatever its language, and guesses at nothing else', function () {
+    var pl = { lang: 'pl', name: 'Film.pl.srt' };
+    var de = { lang: 'de', name: 'Film.de.srt' };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([pl], 'en'), pl);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([pl, de], 'en'), null);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([], 'en'), null);
+    assert.strictEqual(LanguageList.pickAutoSubtitle(null, 'en'), null);
+});
+
+/* Loosely matched files (SubMatch): only when nothing carries the video's name. */
+
+test('Auto prefers a file with the video\'s own name over a loosely matched one', function () {
+    var own   = { lang: 'de', name: 'Film.de.srt' };
+    var loose = { lang: '', name: 'English.srt', loose: true };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([loose, own], 'en'), own);
+});
+
+test('Auto takes a lone loose file, else the one named in the app language, else none', function () {
+    var en = { lang: '', name: 'Subs/2_English.srt', loose: true };
+    var nl = { lang: '', name: 'Subs/5_Dutch.srt', loose: true };
+    var fr = { lang: '', name: 'Subs/7_French.srt', loose: true };
+    assert.strictEqual(LanguageList.pickAutoSubtitle([nl], 'en'), nl);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([en, nl, fr], 'nl-NL'), nl);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([en, nl, fr], 'en'), en);
+    assert.strictEqual(LanguageList.pickAutoSubtitle([nl, fr], 'en'), null);
+});

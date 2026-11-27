@@ -1,0 +1,7 @@
+# Normalise line endings so Windows and Linux builds agree.
+* text=auto
+*.sh text eol=lf
+scripts/* text eol=lf
+*.png binary
+*.jpg binary
+*.wgt binary

@@ -1,0 +1,422 @@
+/* USB / local file browsing via tizen.filesystem.
+ *
+ * Tizen Web FS uses a "virtual root" concept:
+ *   - 'removable1', 'removable2' etc. for USB drives
+ *   - 'documents', 'downloads', 'music', 'videos', 'images' for built-in
+ *   - 'wgt-package' for our app's own bundled files
+ *
+ * We resolve all known roots, list any that contain media, and let the user
+ * navigate file tree relative to them.  Every file is listed with its kind
+ * (FileTypes); video and audio are the "playable" items. */
+
+var Browser = (function () {
+    // Text-based subtitle formats we can convert to WebVTT on the fly.
+    // A .txt next to a video is one too: MicroDVD, MPL2 or TMPlayer, the
+    // formats Polish and Czech subtitle sites ship (issue #165).
+    // Image-based subs (.sub/.idx VobSub, .sup PGS, DVD streams) aren't
+    // representable in HTML5 <track> at all and are deliberately omitted.
+    var SUBTITLE_EXTS = ['vtt', 'srt', 'ass', 'ssa', 'smi', 'sami', 'txt'];
+
+    function ext(name) {
+        var dot = name.lastIndexOf('.');
+        return dot < 0 ? '' : name.slice(dot + 1).toLowerCase();
+    }
+    function basename(name) {
+        var dot = name.lastIndexOf('.');
+        return dot < 0 ? name : name.slice(0, dot);
+    }
+    function isMedia(name)    { return FileTypes.isPlayable(name); }
+    function isSubtitle(name) { return SUBTITLE_EXTS.indexOf(ext(name)) >= 0; }
+
+    /* Static fallback list of known Tizen virtual root names — used only when
+     * tizen.filesystem.listStorages() isn't available (very old firmware). */
+    var STATIC_ROOTS = [
+        'removable1', 'removable2', 'removable3', 'removable4',
+        'downloads', 'videos', 'music', 'images', 'documents'
+    ];
+
+    /* List the top-level "drives" — only includes ones that resolve.
+     *
+     * The right way on modern Tizen is `tizen.filesystem.listStorages()` —
+     * USB drives appear in there with dynamic names like `removable_<uuid>`
+     * which a static hardcoded list can never match.  We pull from that
+     * dynamic list when available, and only fall back to the static one if
+     * the API throws or returns empty (e.g. very old firmware). */
+    function listRoots(cb) {
+        if (typeof tizen === 'undefined' || !tizen.filesystem) {
+            if (typeof Debug !== 'undefined') Debug.browse('tizen.filesystem not available');
+            cb(new Error('tizen.filesystem not available')); return;
+        }
+
+        var dynamicNames = null;
+
+        function resolveAll(names, done) {
+            var results = [];
+            if (!names.length) { done(results); return; }
+            var pending = names.length;
+            names.forEach(function (name) {
+                try {
+                    tizen.filesystem.resolve(name,
+                        function (dir) {
+                            if (typeof Debug !== 'undefined') Debug.browse('  resolved ' + name + ' → ' + dir.fullPath);
+                            results.push({ name: name, dir: dir, fullPath: dir.fullPath });
+                            if (--pending === 0) done(results);
+                        },
+                        function (err) {
+                            if (typeof Debug !== 'undefined') Debug.browse('  ' + name + ' rejected: ' + (err && err.message || err));
+                            if (--pending === 0) done(results);
+                        },
+                        'r'
+                    );
+                } catch (e) {
+                    if (typeof Debug !== 'undefined') Debug.browse('  ' + name + ' threw: ' + e.message);
+                    if (--pending === 0) done(results);
+                }
+            });
+        }
+
+        function finalize(results) {
+            // Sort: external/removable first, then internal
+            results.sort(function (a, b) {
+                var ar = /removable|usb/i.test(a.name) ? 0 : 1;
+                var br = /removable|usb/i.test(b.name) ? 0 : 1;
+                if (ar !== br) return ar - br;
+                return a.name.localeCompare(b.name);
+            });
+            if (typeof Debug !== 'undefined') Debug.browse('listRoots done: ' + results.length + ' usable');
+            cb(null, results);
+        }
+
+        /* 1. Try the modern enumeration API first. */
+        try {
+            tizen.filesystem.listStorages(function (storages) {
+                if (typeof Debug !== 'undefined')
+                    Debug.browse('listStorages → ' + storages.length + ' entries: ' +
+                        storages.map(function (s) { return s.label + '(' + s.type + '/' + s.state + ')'; }).join(', '));
+                // Use mounted storages — both INTERNAL and EXTERNAL
+                dynamicNames = storages
+                    .filter(function (s) { return s.state === 'MOUNTED'; })
+                    .map(function (s) { return s.label; });
+                if (dynamicNames.length === 0) {
+                    if (typeof Debug !== 'undefined') Debug.browse('listStorages empty — falling back to static probe');
+                    resolveAll(STATIC_ROOTS, finalize);
+                } else {
+                    // Also try standard convenience names that listStorages might miss
+                    var extras = ['videos', 'downloads', 'music', 'images', 'documents'];
+                    var combined = dynamicNames.slice();
+                    extras.forEach(function (n) { if (combined.indexOf(n) < 0) combined.push(n); });
+                    resolveAll(combined, finalize);
+                }
+            }, function (err) {
+                if (typeof Debug !== 'undefined') Debug.browse('listStorages err: ' + (err && err.message || err));
+                resolveAll(STATIC_ROOTS, finalize);
+            });
+        } catch (e) {
+            if (typeof Debug !== 'undefined') Debug.browse('listStorages threw: ' + e.message + ' — falling back');
+            resolveAll(STATIC_ROOTS, finalize);
+        }
+    }
+
+    /* List entries of a given Tizen File (must be a directory). */
+    function listDir(file, cb) {
+        if (typeof Debug !== 'undefined') Debug.browse('listDir ' + (file && file.fullPath));
+        try {
+            file.listFiles(
+                function (entries) {
+                    if (typeof Debug !== 'undefined') Debug.browse('  ' + entries.length + ' entries');
+                    // A Subs / Subtitles folder next to a video counts as part
+                    // of this folder: its files are read along (SubMatch).
+                    var subsDir = null, hasVideo = false;
+                    entries.forEach(function (f) {
+                        if (f.isDirectory) { if (!subsDir && SubMatch.isSubsDir(f.name)) subsDir = f; }
+                        else if (FileTypes.kind(f.name) === 'video') hasVideo = true;
+                    });
+                    if (!subsDir || !hasVideo) { finish(entries, []); return; }
+                    try {
+                        subsDir.listFiles(
+                            function (kids) { episodeFolders(entries, kids, subsDir.name); },
+                            function ()     { finish(entries, []); });
+                    } catch (e) { finish(entries, []); }
+                },
+                function (err) {
+                    if (typeof Debug !== 'undefined') Debug.browse('  listFiles err: ' + (err && err.message || err));
+                    cb(err);
+                }
+            );
+        } catch (e) {
+            if (typeof Debug !== 'undefined') Debug.browse('  listDir threw: ' + e.message);
+            cb(e);
+        }
+
+        function subEntry(f, dir) {
+            var s = {
+                name:     f.name,
+                lang:     extractLangTag(f.name),
+                ext:      ext(f.name),
+                uri:      typeof f.toURI === 'function' ? f.toURI() : 'file://' + f.fullPath,
+                fullPath: f.fullPath,
+                file:     f
+            };
+            if (dir) s.dir = dir;
+            return s;
+        }
+        /* Season packs: Subs/<video's name>/2_English.srt.  Each such
+         * folder is read, one at a time, and its files go to that video. */
+        function episodeFolders(entries, kids, subsDirName) {
+            var dirs = {};
+            kids.forEach(function (k) { if (k.isDirectory) dirs[k.name] = k; });
+            var todo = SubMatch.episodeDirs(
+                entries.filter(function (f) { return !f.isDirectory; }).map(function (f) { return f.name; }),
+                Object.keys(dirs));
+            var own = [];
+            (function next() {
+                var ep = todo.shift();
+                if (!ep) { finish(entries, kids, subsDirName, own); return; }
+                function got(list) {
+                    (list || []).forEach(function (f) {
+                        if (f.isDirectory || !isSubtitle(f.name)) return;
+                        var s = subEntry(f, subsDirName);
+                        s.video = ep.video;
+                        own.push(s);
+                    });
+                    next();
+                }
+                try { dirs[ep.name].listFiles(got, function () { got(null); }); }
+                catch (e) { got(null); }
+            })();
+        }
+        function finish(entries, subsKids, subsDirName, episodeSubs) {
+            // Every playable item gets its candidate subtitles: the
+            // files carrying its name, then SubMatch's looser picks.
+            var subs = [];
+            entries.forEach(function (f) {
+                if (!f.isDirectory && isSubtitle(f.name)) subs.push(subEntry(f));
+            });
+            subsKids.forEach(function (f) {
+                if (!f.isDirectory && isSubtitle(f.name)) subs.push(subEntry(f, subsDirName));
+            });
+            subs = subs.concat(episodeSubs || []);
+            var paired = SubMatch.pair(
+                entries.filter(function (f) { return !f.isDirectory && isMedia(f.name); })
+                       .map(function (f) { return f.name; }), subs);
+
+            var out = entries.map(function (f) {
+                var subs = (!f.isDirectory && paired[f.name]) || [];
+                return {
+                    name:     f.name,
+                    isDir:    f.isDirectory,
+                    kind:     f.isDirectory ? 'dir' : FileTypes.kind(f.name),
+                    playable: !f.isDirectory && isMedia(f.name),
+                    size:     f.fileSize,
+                    mtime:    f.modified,
+                    file:     f,
+                    uri:      avplayURI(f),
+                    fullPath: f.fullPath,
+                    subtitles: subs
+                };
+            });
+            out.sort(function (a, b) {
+                if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+                return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+            });
+            cb(null, out);
+        }
+    }
+
+    /* Return parent of a Tizen File via its parent property, or null at root. */
+    function parentOf(file) {
+        return file && file.parent ? file.parent : null;
+    }
+
+    /* Build the URI to hand to the player for a local File.  We use tizen's
+     * own toURI() — file:///opt/media/USBDriveXX/... — which the WebView's
+     * HTML5 <video> element can load (AVPlay can't on this firmware). */
+    function avplayURI(f) {
+        if (typeof f.toURI === 'function') return f.toURI();
+        return 'file://' + (f.fullPath || '');
+    }
+
+    /* Convert a fileSize to "1.2 GB" style. */
+    function humanSize(bytes) {
+        if (typeof bytes !== 'number') return '';
+        var units = ['B','KB','MB','GB','TB'], i = 0;
+        while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+        return bytes.toFixed(bytes >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    /* Extract a 2-3 letter ISO language code from a subtitle file's name,
+     * e.g. "movie.en.srt" → "en", "movie.eng.vtt" → "eng".  Returns '' if
+     * no language tag can be inferred. */
+    function extractLangTag(name) {
+        var b = basename(name);                  // "movie.en"
+        var parts = b.split('.');
+        if (parts.length < 2) return '';
+        var last = parts[parts.length - 1];
+        if (/^[a-z]{2,3}$/i.test(last)) return last.toLowerCase();
+        return '';
+    }
+
+    /* Read a subtitle file's content as text.
+     * Accepts entries with a live Tizen File object on `.file` (the normal
+     * USB browse-then-play flow), just a `.fullPath` string (recent-items
+     * replay, where the original File didn't survive JSON.stringify in
+     * localStorage — the path is resolved back to a File first), or an
+     * http(s) `.uri` with neither (a sidecar next to a video on an SMB
+     * share, served by the smbproxy service).
+     *
+     * Subtitle files are not reliably UTF-8: a Portuguese .srt saved by a
+     * Windows tool is windows-1252, and reading it as UTF-8 turned every
+     * accented letter into a replacement glyph (issue #162).  So the bytes
+     * are read raw and the encoding guessed by TextDecode, the same way the
+     * text viewer and playlist reader do.  The old UTF-8 stream read stays
+     * as the fallback for a firmware where the byte reader fails. */
+    var MAX_SUBTITLE_BYTES = 16 * 1024 * 1024;
+    function readSubtitleText(subEntry, cb) {
+        if (!subEntry) { cb(new Error('no entry')); return; }
+        if (subEntry.file) { readDecoded(subEntry.file, subEntry, cb); return; }
+        if (subEntry.fullPath) {
+            try {
+                tizen.filesystem.resolve(subEntry.fullPath,
+                    function (f) { readDecoded(f, subEntry, cb); },
+                    function (e) { cb(e); },
+                    'r');
+            } catch (e) { cb(e); }
+            return;
+        }
+        if (/^https?:\/\//i.test(subEntry.uri || '')) { readDecoded(subEntry.uri, subEntry, cb); return; }
+        cb(new Error('no file'));
+    }
+    /* src: Tizen File or http URL.  Bytes → guessed encoding → text. */
+    function readDecoded(src, subEntry, cb) {
+        var canDecode = typeof TextDecode !== 'undefined' && TextDecode.decode;
+        if (!canDecode) { readUtf8(src, cb); return; }
+        readHead(src, MAX_SUBTITLE_BYTES, function (err, bytes) {
+            if (err || !bytes) {
+                if (typeof Debug !== 'undefined')
+                    Debug.player('subtitle byte read failed (' + (err && err.message || err) + '), reading as UTF-8');
+                readUtf8(src, cb);
+                return;
+            }
+            var d = TextDecode.decode(bytes, subEntry && subEntry.forceEncoding);
+            if (d.binary) { cb(new Error('subtitle file looks binary')); return; }
+            if (typeof Debug !== 'undefined')
+                Debug.player('subtitle ' + (subEntry.title || subEntry.name || subEntry.ext || '') +
+                             ': ' + bytes.length + ' bytes, ' + d.encoding);
+            cb(null, d.text);
+        });
+    }
+    function readUtf8(src, cb) {
+        if (typeof src === 'string') readFromUrl(src, cb);
+        else readFromFileObj(src, cb);
+    }
+    function readFromUrl(url, cb) {
+        try {
+            var x = new XMLHttpRequest();
+            x.open('GET', url, true);
+            x.timeout = 15000;
+            x.onload = function () {
+                if (x.status >= 200 && x.status < 300) cb(null, x.responseText || '');
+                else cb(new Error('subtitle fetch HTTP ' + x.status + (x.responseText ? ': ' + x.responseText : '')));
+            };
+            x.onerror   = function () { cb(new Error('subtitle fetch failed (service unreachable?)')); };
+            x.ontimeout = function () { cb(new Error('subtitle fetch timed out')); };
+            x.send();
+        } catch (e) { cb(e); }
+    }
+    function readFromFileObj(file, cb) {
+        try {
+            file.openStream('r',
+                function (stream) {
+                    try {
+                        var text = stream.read(stream.bytesAvailable);
+                        stream.close();
+                        cb(null, text);
+                    } catch (e) {
+                        try { stream.close(); } catch (e2) {}
+                        cb(e);
+                    }
+                },
+                function (err) { cb(err); },
+                'UTF-8'
+            );
+        } catch (e) {
+            cb(e);
+        }
+    }
+
+    /* The first maxBytes of a file, for the text viewer and the playlist
+     * reader.  `src` is a Tizen File (USB), or an http URL — the smbproxy
+     * serves share files with Range support, so a 200 MB log costs one
+     * ranged read rather than a download.  A USB file goes through
+     * Mp4Subs.openReader, which knows every way this firmware can be made
+     * to read bytes.  cb(err, Uint8Array, totalSize); totalSize is 0 when
+     * the reply doesn't say. */
+    function readHead(src, maxBytes, cb) {
+        if (typeof src === 'string' && /^https?:/i.test(src)) { readHeadHttp(src, maxBytes, cb); return; }
+        if (typeof Mp4Subs === 'undefined' || !Mp4Subs.openReader) { cb(new Error('no file reader')); return; }
+        Mp4Subs.openReader(src, function (err, reader) {
+            if (err) { cb(err); return; }
+            function done(e, bytes, total) {
+                try { if (reader.close) reader.close(); } catch (x) {}
+                cb(e, bytes, total);
+            }
+            reader.getSize(function (e, size) {
+                if (e) { done(e); return; }
+                var n = Math.min(size, maxBytes);
+                if (!n) { done(null, new Uint8Array(0), size); return; }
+                reader.readRange(0, n, function (e2, buf) {
+                    if (e2) { done(e2); return; }
+                    done(null, new Uint8Array(buf), size);
+                });
+            });
+        });
+    }
+    /* One ranged GET.  A server that ignores Range sends the whole file,
+     * which is cut to size here. */
+    function readHeadHttp(url, maxBytes, cb) {
+        var done = false;
+        function finish(e, b, t) { if (!done) { done = true; cb(e, b, t); } }
+        try {
+            var x = new XMLHttpRequest();
+            x.open('GET', url, true);
+            x.responseType = 'arraybuffer';
+            x.timeout = 30000;
+            x.setRequestHeader('Range', 'bytes=0-' + (maxBytes - 1));
+            x.onload = function () {
+                // 416: an empty file has no byte 0 to start the range at.
+                if (x.status === 416) { finish(null, new Uint8Array(0), 0); return; }
+                if (x.status < 200 || x.status >= 300) {
+                    var why = '';
+                    try { why = x.response ? String.fromCharCode.apply(null, new Uint8Array(x.response).subarray(0, 200)) : ''; } catch (e) {}
+                    finish(new Error('HTTP ' + x.status + (why ? ': ' + why : '')));
+                    return;
+                }
+                var b = new Uint8Array(x.response || new ArrayBuffer(0));
+                var total = 0;
+                try {
+                    var m = /\/\s*(\d+)\s*$/.exec(x.getResponseHeader('Content-Range') || '');
+                    total = m ? parseInt(m[1], 10) : (x.status === 200 ? b.length : 0);
+                } catch (e) {}
+                finish(null, b.length > maxBytes ? b.subarray(0, maxBytes) : b, total);
+            };
+            x.onerror   = function () { finish(new Error('network error')); };
+            x.ontimeout = function () { finish(new Error('timed out')); };
+            x.send();
+        } catch (e) { finish(e); }
+    }
+
+    return {
+        listRoots:        listRoots,
+        listDir:          listDir,
+        parentOf:         parentOf,
+        avplayURI:        avplayURI,
+        isMedia:          isMedia,
+        isSubtitle:       isSubtitle,
+        humanSize:        humanSize,
+        readSubtitleText: readSubtitleText,
+        readHead:         readHead
+    };
+})();
+
+// Ignored by the Tizen/browser build; lets Node tests drive the module.
+if (typeof module !== 'undefined' && module.exports) module.exports = Browser;

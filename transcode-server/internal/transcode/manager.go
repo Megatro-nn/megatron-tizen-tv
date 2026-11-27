@@ -1,0 +1,381 @@
+package transcode
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// nowFn is a seam so tests could fake the clock; real code uses time.Now.
+var nowFn = time.Now
+
+// idleTimeout kills a session whose playlist/segments haven't been requested in
+// a while — i.e. the user stopped watching or moved on.
+const idleTimeout = 90 * time.Second
+
+// probeTTL is how long an ffprobe result is reused. With smart routing the TV
+// asks /api/probe right before it plays a file, and when the answer is "through
+// the server" /play has to probe the same file again — the cache makes that
+// second ffprobe over SMB free.
+const probeTTL = 10 * time.Minute
+
+// RawURLFunc builds the internal HTTP URL ffmpeg should read for a file on a
+// share or a WebDAV server. (Injected so this package doesn't import the
+// web/http layer.)
+type RawURLFunc func(src Source) string
+
+// SurroundFunc reports the currently configured surround mode. It's a func
+// rather than a value because the setting is web-editable while the server
+// runs, and we want the next play to honour the new setting without a restart.
+type SurroundFunc func() string
+
+// Manager owns the working directory and the live session set.
+type Manager struct {
+	caps     *Caps
+	workDir  string
+	rawURL   RawURLFunc
+	surround SurroundFunc
+
+	mu       sync.Mutex
+	sessions map[string]*session
+	probes   map[string]probed // Source.key() -> last ffprobe result
+}
+
+type probed struct {
+	mi *MediaInfo
+	at time.Time
+}
+
+// NewManager wires the manager and starts the idle-reaper goroutine. surround
+// may be nil, in which case the surround policy is permanently off.
+func NewManager(caps *Caps, workDir string, rawURL RawURLFunc, surround SurroundFunc) (*Manager, error) {
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return nil, err
+	}
+	// Clear stale work from a previous run.
+	entries, _ := filepath.Glob(filepath.Join(workDir, "*"))
+	for _, e := range entries {
+		os.RemoveAll(e)
+	}
+	m := &Manager{caps: caps, workDir: workDir, rawURL: rawURL, surround: surround,
+		sessions: map[string]*session{}, probes: map[string]probed{}}
+	go m.reap()
+	return m, nil
+}
+
+// Source is what one session reads from. Exactly one form is set: SMBPath for
+// a file on a configured share (bridged through /raw; Share is the share's ID,
+// "" for the first one); DAVPath for a file on a WebDAV server the TV
+// registered (bridged through /raw too; DAV is that server's id); or URL for a
+// file the box can already fetch over HTTP — the TV's own USB/local relay, so
+// files sitting on a drive plugged into the TV get the same treatment as files
+// on the share.
+type Source struct {
+	Share   string
+	SMBPath string
+	DAV     string
+	DAVPath string
+	URL     string
+}
+
+// SMBSource / DAVSource / HTTPSource are the constructors, so callers can't
+// build a Source with two forms (or none) set by accident.
+func SMBSource(shareID, path string) Source { return Source{Share: shareID, SMBPath: path} }
+func DAVSource(id, path string) Source      { return Source{DAV: id, DAVPath: path} }
+func HTTPSource(url string) Source          { return Source{URL: url} }
+
+// key identifies the source for the session map and the work directory.
+func (s Source) key() string {
+	switch {
+	case s.URL != "":
+		return "url:" + s.URL
+	case s.DAV != "":
+		return "dav:" + s.DAV + ":" + s.DAVPath
+	case s.Share != "":
+		return "smb:" + s.Share + ":" + s.SMBPath
+	}
+	return "smb:" + s.SMBPath
+}
+
+// Label is the short human form used in logs and error messages.
+func (s Source) Label() string {
+	switch {
+	case s.URL != "":
+		return s.URL
+	case s.DAV != "":
+		return "[dav " + s.DAV + "] " + s.DAVPath
+	case s.Share != "":
+		return "[" + s.Share + "] " + s.SMBPath
+	}
+	return s.SMBPath
+}
+
+// input resolves what ffmpeg actually opens.
+func (m *Manager) input(s Source) string {
+	if s.URL != "" {
+		return s.URL
+	}
+	return m.rawURL(s)
+}
+
+// surroundMode reads the live setting, normalised.
+func (m *Manager) surroundMode() string {
+	if m.surround == nil {
+		return SurroundOff
+	}
+	return NormaliseSurround(m.surround())
+}
+
+// Caps exposes the probed capabilities (for the status page).
+func (m *Manager) Caps() *Caps { return m.caps }
+
+// EnsureSession returns a ready session for the given source, starting ffmpeg
+// (after probing + deciding) if one isn't already running. It blocks until the
+// first segment exists so the caller can immediately redirect AVPlay to the
+// playlist.
+func (m *Manager) EnsureSession(ctx context.Context, src Source) (*session, error) {
+	surround := m.surroundMode()
+	id := idFor(src.key(), surround)
+
+	m.mu.Lock()
+	if s, ok := m.sessions[id]; ok && !s.isDone() {
+		s.Touch()
+		m.mu.Unlock()
+		if err := waitReady(ctx, s); err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
+	m.mu.Unlock()
+
+	in := m.input(src)
+
+	// Probe + decide before committing to a session.
+	mi, err := m.inspect(ctx, src)
+	if err != nil {
+		return nil, fmt.Errorf("probe failed: %w", err)
+	}
+	plan := Decide(mi, surround)
+	log.Printf("transcode %q: %s (codec v=%s a=%s/%dch, surround=%s)",
+		src.Label(), plan.Reason, mi.VideoCodec, mi.AudioCodec, mi.AudioChans, surround)
+
+	dir := filepath.Join(m.workDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+
+	sctx, cancel := context.WithCancel(context.Background())
+	s := &session{
+		ID: id, SrcPath: src.Label(), Dir: dir, Plan: plan,
+		cancel: cancel, logTail: newRing(60), lastAccess: nowFn(),
+	}
+
+	args := m.caps.buildArgs(in, plan, dir)
+	cmd := exec.CommandContext(sctx, m.caps.FFmpeg, args...)
+	dieWithParent(cmd)
+	s.cmd = cmd
+
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		cancel()
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("start ffmpeg: %w", err)
+	}
+	go drain(stderr, s)
+	go func() {
+		err := cmd.Wait()
+		s.mu.Lock()
+		s.done, s.exitErr = true, err
+		s.mu.Unlock()
+	}()
+
+	m.mu.Lock()
+	m.sessions[id] = s
+	m.mu.Unlock()
+
+	if err := waitReady(ctx, s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Probe answers "what would /play do with this file?" without starting ffmpeg.
+func (m *Manager) Probe(ctx context.Context, src Source) (*MediaInfo, Plan, error) {
+	mi, err := m.inspect(ctx, src)
+	if err != nil {
+		return nil, Plan{}, err
+	}
+	return mi, Decide(mi, m.surroundMode()), nil
+}
+
+// inspect is Caps.Inspect behind the probe cache.
+func (m *Manager) inspect(ctx context.Context, src Source) (*MediaInfo, error) {
+	key := src.key()
+	m.mu.Lock()
+	if p, ok := m.probes[key]; ok && nowFn().Sub(p.at) < probeTTL {
+		m.mu.Unlock()
+		return p.mi, nil
+	}
+	m.mu.Unlock()
+
+	mi, err := m.caps.Inspect(ctx, m.input(src))
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	m.probes[key] = probed{mi: mi, at: nowFn()}
+	m.mu.Unlock()
+	return mi, nil
+}
+
+// Session looks up a live session by id (used when serving segments).
+func (m *Manager) Session(id string) (*session, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[id]
+	return s, ok
+}
+
+func (s *session) isDone() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.done
+}
+
+// waitReady blocks until the first segment is written, ffmpeg dies, or ctx ends.
+func waitReady(ctx context.Context, s *session) error {
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(150 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if s.ready() {
+			return nil
+		}
+		if s.isDone() {
+			return fmt.Errorf("ffmpeg exited before producing output: %s", s.tailAll())
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("timed out waiting for transcode to start: %s", s.tail())
+		case <-tick.C:
+		}
+	}
+}
+
+// reap stops sessions that have gone idle.
+func (m *Manager) reap() {
+	t := time.NewTicker(15 * time.Second)
+	for range t.C {
+		now := nowFn()
+		m.mu.Lock()
+		for id, s := range m.sessions {
+			s.mu.Lock()
+			idle := now.Sub(s.lastAccess) > idleTimeout
+			done := s.done
+			s.mu.Unlock()
+			if idle || (done && now.Sub(s.lastAccess) > 10*time.Second) {
+				log.Printf("reap session %s (%s)", id, s.SrcPath)
+				s.stop()
+				delete(m.sessions, id)
+			}
+		}
+		for key, p := range m.probes {
+			if now.Sub(p.at) >= probeTTL {
+				delete(m.probes, key)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+func drain(r interface{ Read([]byte) (int, error) }, s *session) {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		s.logTail.add(sc.Text())
+	}
+}
+
+func (s *session) tail() string { return s.logTail.last() }
+
+// tailAll returns every non-empty line the ring still holds, oldest first,
+// joined with " / " so it survives travelling through a single-line error
+// message.  Used when ffmpeg dies before producing output — the bare last
+// line ("Nothing was written into output file…") rarely names the actual
+// cause, but the lines before it (input format, stream count, demuxer
+// warnings, codec rejections) usually do. */
+func (s *session) tailAll() string { return s.logTail.dump() }
+
+// ── tiny line ring buffer for surfacing ffmpeg's last words on failure ──────
+type ring struct {
+	mu   sync.Mutex
+	buf  []string
+	n    int
+	full bool
+}
+
+func newRing(n int) *ring { return &ring{buf: make([]string, n)} }
+func (r *ring) add(line string) {
+	r.mu.Lock()
+	r.buf[r.n] = line
+	r.n = (r.n + 1) % len(r.buf)
+	if r.n == 0 {
+		r.full = true
+	}
+	r.mu.Unlock()
+}
+func (r *ring) last() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.full && r.n == 0 {
+		return "(no output)"
+	}
+	// Return the most recent non-empty line.
+	for i := 0; i < len(r.buf); i++ {
+		idx := (r.n - 1 - i + len(r.buf)) % len(r.buf)
+		if r.buf[idx] != "" {
+			return r.buf[idx]
+		}
+	}
+	return "(no output)"
+}
+
+// dump returns every non-empty line oldest-first, joined with " / ".
+func (r *ring) dump() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.full && r.n == 0 {
+		return "(no output)"
+	}
+	size := len(r.buf)
+	start := 0
+	if r.full {
+		start = r.n // when full, oldest line lives at r.n
+	}
+	lines := make([]string, 0, size)
+	for i := 0; i < size; i++ {
+		idx := (start + i) % size
+		if r.buf[idx] != "" {
+			lines = append(lines, r.buf[idx])
+		}
+	}
+	if len(lines) == 0 {
+		return "(no output)"
+	}
+	// " / " is a separator unlikely to appear inside ffmpeg's own log lines,
+	// keeps everything on one telemetry line even when it travels through
+	// log.Printf or an HTTP error body.
+	out := lines[0]
+	for _, ln := range lines[1:] {
+		out += " / " + ln
+	}
+	return out
+}

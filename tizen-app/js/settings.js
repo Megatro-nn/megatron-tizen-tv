@@ -1,0 +1,704 @@
+/* Persistent user preferences + TV-capability detection.
+ *
+ * Settings are stored in localStorage under `vlctv_settings_v1` so they
+ * survive app restarts.  TV info / codec support is queried at runtime from
+ * tizen.systeminfo, webapis.productinfo, and HTMLVideoElement.canPlayType. */
+
+var Settings = (function () {
+    var KEY = 'vlctv_settings_v1';
+    var defaults = {
+        // Language of the app itself: '' = follow the TV, or a locale code
+        // from I18n.languages() (nl-NL, pt-BR …).
+        uiLanguage:       '',
+        // The screen the app opens on: 'home', or one of the Home tiles
+        // (see StartScreen below) for someone who always goes straight to
+        // the same share.  Back from that screen leads to Home as usual.
+        startScreen:      'home',
+        audioLang:        '',          // '' = auto (use file's default), or ISO code
+        subtitleLang:     '',          // '' = auto (on by default), 'off' = no subs, or ISO code (first choice)
+        subtitleLang2:    '',          // second choice when the first is not there ('' = none)
+        repeatMode:       'off',       // 'off' | 'one' | 'all'
+        // Play the next file in the folder when one finishes.  On since
+        // 1.18 (issue #126): a music player that stops after each song
+        // reads as broken.  Only a TV with nothing stored gets the default,
+        // so anyone who chose Off before keeps it (see load()).
+        autoPlay:         true,
+        // Seconds each picture stays on screen in a slideshow (issue #126).
+        slideshowSeconds: 5,
+        // What to do when a file with a saved position is opened again:
+        // 'ask' shows a Continue / Start-over prompt, 'always' resumes
+        // silently (the pre-1.5 behaviour), 'never' starts from the top.
+        resumeMode:       'ask',       // 'ask' | 'always' | 'never'
+        // Keep a Recently Played list and show its tile on Home (issue
+        // #142).  Off: nothing new is remembered and the tile is hidden;
+        // what was listed before stays until it is cleared.
+        recentHistory:    true,
+        shuffle:          false,       // randomize playlist order (folder + recent) instead of alphabetical
+        // What the USB and SMB browsers list: 'all' files (pictures and text
+        // open in the viewers, anything else is shown but can't be opened),
+        // or 'media' — folders, video, audio and playlists, as before 1.11.
+        browseFilter:     'all',       // 'all' | 'media'
+        // List files and folders whose name starts with a dot (issue #147).
+        // Off by default: on a stick or share written from a Mac those are
+        // "._movie.mp4" companions and .DS_Store, which only get in the way.
+        showHidden:       false,
+        // Megatron: how a USB folder is drawn and ordered.
+        browseView:       'large',     // 'details' | 'list' | 'large' | 'small' | 'tiles'
+        browseSort:       'name-asc',  // 'name'|'date'|'size'|'type' + '-asc'|'-desc'
+        // The Play all / Shuffle all rows on top of a folder that has
+        // subfolders (issues #159, #174).  Off for those who only browse
+        // video and find the two rows in the way.
+        theme:            'dark',      // see THEME_KEYS in app.js
+        accent:           'sky',       // see ACCENT_KEYS in app.js
+        textSize:         'normal',    // file list text: 'normal' | 'large' | 'xlarge'
+        timeMode:         'total',     // right-hand time on the player bar: 'total' | 'remaining'
+        skipShort:        '10',        // seconds per press of the left and right keys
+        skipLong:         '30',        // seconds per press of FF and RW
+        background:       'default',   // 'default' | 'aurora' | 'grid' | 'picture'
+        fanart:           'subtle',    // fanart behind a folder: 'off' | 'subtle' | 'strong'
+        folderPlayRows:   false,   // Megatron: off by default; Settings turns it on
+        // Network access level (see js/network-access.js): 'all'; 'own',
+        // which allows servers and URLs the user added but blocks
+        // third-party services (ntfy.sh, used by cast-from-phone and code
+        // pairing); or 'none', for USB and internal storage only.
+        networkAccess:    'own',       // 'all' | 'own' | 'none'
+        // Route USB / internal-storage files through the paired transcode
+        // server instead of straight into AVPlay.  Off by default: it only
+        // helps when a transcode server is paired, and it costs the embedded
+        // AVPlay fallbacks that direct local playback gets.
+        localRelay:       false,
+        // Ask the paired transcode server about each file first (share files,
+        // and USB files when localRelay is on), and play the ones it would only
+        // remux directly — keeping every audio track and native seeking.  Off
+        // by default: it adds a probe before each play, and trusts the server's
+        // codec list over the always-works HLS route (a failed direct open
+        // falls back to it).
+        smartRouting:     false,
+        // ── Subtitle appearance (applied to the painted overlay) ──────────
+        subtitleSize:     'medium',    // 'small' | 'medium' | 'large' | 'xlarge'
+        subtitleFont:     'sans',      // 'sans' | 'serif' | 'mono'
+        subtitleColor:    'white',     // 'white' | 'yellow' | 'cyan' | 'green'
+        subtitleWeight:   'normal',    // 'normal' | 'bold'
+        subtitlePosition: 'bottom',    // 'bottom' | 'middle' | 'top'
+        subtitleBg:       'none',      // 'none' | 'box'  (translucent box behind text)
+        subtitleOutline:  'medium',    // 'off' | 'thin' | 'medium' | 'thick' | 'xthick'
+        subtitleShadow:   'soft',      // 'off' | 'soft' | 'strong'
+        subtitleOpacity:  '100',       // text opacity in percent: '100' | '75' | '50'
+        subtitleCustom:   '',          // JSON of the user's own saved look ('' = none)
+        // ── Video geometry ────────────────────────────────────────────────
+        // How the picture is fitted to the screen: see AspectRatio below.
+        aspectMode:       'fit',       // 'fit' | 'fill' | 'stretch'
+        // The TV's pairing code (url-drop.js mints it once and persists it
+        // here).  It HAS to be listed: load() rebuilds the cache from this
+        // object, so a key that isn't here is silently dropped on the next
+        // launch — which regenerated the code on every app start and quietly
+        // unpaired every phone that had scanned the QR.
+        urlDropCode:      ''
+    };
+    var cache = null;
+
+    function load() {
+        if (cache) return cache;
+        var stored = {};
+        try {
+            var raw = localStorage.getItem(KEY);
+            stored = raw ? JSON.parse(raw) : {};
+        } catch (e) { stored = {}; }
+        // Build from defaults so newly-added keys always have a value, even
+        // when the stored blob predates them.
+        cache = {};
+        for (var k in defaults)
+            cache[k] = (stored && k in stored) ? stored[k] : defaults[k];
+        return cache;
+    }
+    function save() {
+        try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch (e) {}
+    }
+    function get(k)     { return load()[k]; }
+    function setItem(k, v) { load(); cache[k] = v; save(); }
+
+    return { get: get, set: setItem };
+})();
+
+
+var TvInfo = (function () {
+    /* Fetch the BUILD info async then call cb({model, manufacturer, buildVersion, ...}). */
+    function getBuild(cb) {
+        if (typeof tizen === 'undefined' || !tizen.systeminfo) { cb({}); return; }
+        try {
+            tizen.systeminfo.getPropertyValue('BUILD',
+                function (b) {
+                    cb({
+                        model:            b.model,
+                        manufacturer:     b.manufacturer,
+                        buildVersion:     b.buildVersion,
+                        buildDescription: b.buildDescription,
+                        buildReleaseDate: b.buildReleaseDate
+                    });
+                },
+                function () { cb({}); }
+            );
+        } catch (e) { cb({}); }
+    }
+
+    /* webapis.productinfo is a Samsung TV-specific extension — try but tolerate
+     * its absence. */
+    function getProductInfo() {
+        var out = {};
+        try {
+            if (typeof webapis !== 'undefined' && webapis.productinfo) {
+                try { out.realModel       = webapis.productinfo.getRealModel(); }       catch (e) {}
+                try { out.firmwareVersion = webapis.productinfo.getFirmware(); }        catch (e) {}
+                try { out.tvName          = webapis.productinfo.getName(); }            catch (e) {}
+                try { out.model           = webapis.productinfo.getModel(); }           catch (e) {}
+                try { out.smartTVServer   = webapis.productinfo.getSmartTVServerVersion(); } catch (e) {}
+            }
+        } catch (e) {}
+        return out;
+    }
+
+    /* HTML5 codec capability: canPlayType returns 'probably', 'maybe', or '' */
+    function getCodecs() {
+        var v = document.createElement('video');
+        function can(type) {
+            try { return v.canPlayType(type) || ''; } catch (e) { return ''; }
+        }
+        // The codec strings below are the standard MP4/WebM RFC 6381 ids.
+        return {
+            'H.264 (Baseline)': can('video/mp4; codecs="avc1.42E01E"'),
+            'H.264 (Main)':     can('video/mp4; codecs="avc1.4D401E"'),
+            'H.264 (High)':     can('video/mp4; codecs="avc1.64001E"'),
+            'HEVC 8-bit':       can('video/mp4; codecs="hev1.1.6.L93.B0"'),
+            'HEVC 10-bit':      can('video/mp4; codecs="hev1.2.4.L93.B0"'),
+            'VP8':              can('video/webm; codecs="vp8"'),
+            'VP9':              can('video/webm; codecs="vp9"'),
+            'AV1':              can('video/mp4; codecs="av01.0.04M.08"'),
+            'AAC':              can('audio/mp4; codecs="mp4a.40.2"'),
+            'MP3':              can('audio/mpeg'),
+            'Opus':             can('audio/webm; codecs="opus"'),
+            'Vorbis':           can('audio/webm; codecs="vorbis"'),
+            'MP4':              can('video/mp4'),
+            'WebM':             can('video/webm'),
+            'OGG':              can('video/ogg'),
+            'MKV':              can('video/x-matroska'),
+            'HLS':              can('application/vnd.apple.mpegurl'),
+            'MPEG-DASH':        can('application/dash+xml')
+        };
+    }
+
+    function getUA() { return (navigator && navigator.userAgent) || ''; }
+
+    /* Tessel's own version, from config.xml as installed. */
+    function getAppVersion() {
+        try { return tizen.application.getAppInfo().version || ''; } catch (e) { return ''; }
+    }
+
+    return { getBuild: getBuild, getProductInfo: getProductInfo, getCodecs: getCodecs, getUA: getUA,
+             getAppVersion: getAppVersion };
+})();
+
+
+/* The option lists below are built before i18n.js loads, so an entry that
+ * needs translating carries the key of its label, and the label is looked up
+ * each time the list is handed out.  Without I18n (the Node tests) the
+ * English name stays. */
+function i18nName(entry, field) {
+    var key = entry[(field || 'name') + 'Key'];
+    return (key && typeof I18n !== 'undefined') ? I18n.t(key) : entry[field || 'name'];
+}
+function i18nList(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+        var copy = {};
+        for (var k in list[i]) if (Object.prototype.hasOwnProperty.call(list[i], k)) copy[k] = list[i][k];
+        copy.name = i18nName(list[i]);
+        if (copy.short !== undefined) copy.short = i18nName(list[i], 'short');
+        out.push(copy);
+    }
+    return out;
+}
+
+
+/* Curated language list — common languages for media subtitles + audio.
+ * '' = auto (no preference), 'off' is added only to the subtitle picker.
+ *
+ * `alt` carries the spellings a real track label uses for that language:
+ * the ISO 639-2 code(s) a muxer writes into the language tag ('vie', 'ger',
+ * 'chi'), the English name, and the endonym.  matchScore() below works off
+ * those, so "Vietnamese (SDH)" or "[vie]" match a 'vi' preference and a
+ * bare two-letter code can be required to stand as its own word — without
+ * the alias list a 'vi' preference happily matched "Movie". */
+var LanguageList = (function () {
+    var langs = [
+        { code: '',   name: 'Auto (file default)', nameKey: 'lang.auto', alt: [] },
+        { code: 'en', name: 'English',    alt: ['eng', 'english'] },
+        { code: 'nl', name: 'Nederlands', alt: ['dut', 'nld', 'dutch', 'nederlands'] },
+        { code: 'de', name: 'Deutsch',    alt: ['ger', 'deu', 'german', 'deutsch'] },
+        { code: 'fr', name: 'Français',   alt: ['fre', 'fra', 'french', 'français', 'francais'] },
+        { code: 'es', name: 'Español',    alt: ['spa', 'spanish', 'español', 'espanol', 'castellano'] },
+        { code: 'it', name: 'Italiano',   alt: ['ita', 'italian', 'italiano'] },
+        { code: 'pt', name: 'Português',  alt: ['por', 'portuguese', 'português', 'portugues', 'brazilian'] },
+        { code: 'ru', name: 'Русский',    alt: ['rus', 'russian', 'русский'] },
+        { code: 'ja', name: '日本語',      alt: ['jpn', 'japanese', '日本語'] },
+        { code: 'ko', name: '한국어',      alt: ['kor', 'korean', '한국어'] },
+        { code: 'zh', name: '中文',        alt: ['chi', 'zho', 'chinese', 'mandarin', 'cantonese', '中文'] },
+        { code: 'vi', name: 'Tiếng Việt', alt: ['vie', 'vietnamese', 'tiếng việt', 'tieng viet'] },
+        { code: 'ar', name: 'العربية',   alt: ['ara', 'arabic', 'العربية'] },
+        { code: 'tr', name: 'Türkçe',     alt: ['tur', 'turkish', 'türkçe', 'turkce'] },
+        { code: 'pl', name: 'Polski',     alt: ['pol', 'polish', 'polski'] },
+        { code: 'sv', name: 'Svenska',    alt: ['swe', 'swedish', 'svenska'] },
+        { code: 'no', name: 'Norsk',      alt: ['nor', 'nob', 'norwegian', 'norsk'] },
+        { code: 'da', name: 'Dansk',      alt: ['dan', 'danish', 'dansk'] },
+        { code: 'fi', name: 'Suomi',      alt: ['fin', 'finnish', 'suomi'] }
+    ];
+
+    function entryFor(code) {
+        for (var i = 0; i < langs.length; i++) if (langs[i].code === code) return langs[i];
+        return null;
+    }
+
+    /* Every spelling that identifies `code`, lower-cased: the code itself,
+     * its ISO 639-2 forms, the English name and the endonym. */
+    function tagsFor(code) {
+        var c = String(code || '').toLowerCase();
+        var e = entryFor(c);
+        var out = [c];
+        if (e) {
+            for (var i = 0; i < e.alt.length; i++) out.push(e.alt[i]);
+            var n = e.name.toLowerCase();
+            if (out.indexOf(n) < 0) out.push(n);
+        }
+        return out;
+    }
+
+    function esc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    /* Whole-"word" test that also works for names with no spaces — track
+     * labels are routinely filename-ish ("Show.S01E02.vi.srt"), so anything
+     * that isn't a latin letter or digit counts as a separator. */
+    function hasWord(hay, word) {
+        return new RegExp('(^|[^a-z0-9])' + esc(word) + '($|[^a-z0-9])', 'i').test(hay);
+    }
+
+    /* How well a track matches a language preference: 0 = no match, 100 =
+     * the track's own language tag says so.  Shared by the audio picker and
+     * the subtitle picker in app.js so both honour the same spellings. */
+    function matchScore(pref, lang, name) {
+        var want = String(pref || '').toLowerCase();
+        if (!want || want === 'off') return 0;
+        var tags = tagsFor(want);
+        var nm   = String(name || '').toLowerCase();
+
+        // 1. The container's own language tag ('vie', 'vi', 'vi-VN').
+        var base = String(lang || '').toLowerCase().split(/[-_]/)[0];
+        if (base) {
+            if (tags.indexOf(base) >= 0) return 100;
+            if (base.length >= 2 &&
+                (base.indexOf(want) === 0 || want.indexOf(base) === 0)) return 90;
+        }
+        if (!nm) return 0;
+
+        // 2. A code in brackets, the muxer convention: "Subtitle [vie]".
+        for (var i = 0; i < tags.length; i++)
+            if (nm.indexOf('[' + tags[i] + ']') >= 0 ||
+                nm.indexOf('(' + tags[i] + ')') >= 0) return 80;
+
+        // 3. A spelled-out name anywhere in the label: "Vietnamese SDH".
+        //    Two-letter latin tags are held back for step 4 (too collision-
+        //    prone), but a short non-ascii endonym like "中文" is unambiguous.
+        for (var j = 0; j < tags.length; j++)
+            if ((tags[j].length >= 3 || /[^\x00-\x7f]/.test(tags[j])) &&
+                hasWord(nm, tags[j])) return 60;
+
+        // 4. The bare two-letter code, but only as its own word — a loose
+        //    substring here is what made 'vi' match "Movie".
+        if (want.length === 2 && hasWord(nm, want)) return 50;
+        return 0;
+    }
+
+    /* 'Auto (file default)' and a subtitle file next to the video (issue
+     * #165).  The TV's own player loads Film.srt for Film.mkv on its own;
+     * Tessel's Auto only adopted the track the container marks default and
+     * never looked at the folder, so a lone Film.txt sat unused until it
+     * was picked from the CC menu.  Which sidecar Auto takes, in order:
+     *
+     *   1. one with no language tag (Film.srt) — the file's own subtitle;
+     *   2. one tagged with the app's language (Film.pl.srt, Polish UI);
+     *   3. the only one there is, whatever its tag;
+     *
+     * otherwise none: several tagged files in languages the viewer did not
+     * ask for are left to the CC menu rather than guessed at.  `subs` is a
+     * list of { lang } (the tag from the file name, '' for none); `uiLang`
+     * the app's locale ('pl-PL', 'en').  Returns the entry or null.
+     *
+     * Files that only loosely belong to the video (`loose`: English.srt in
+     * a Subs folder, a file sharing the episode number; see SubMatch) come
+     * into it when no file carries the video's own name.  Their names say
+     * nothing reliable about being "the" subtitle, so: the only one there
+     * is, else the first whose name or tag says the app's language. */
+    function pickAutoSubtitle(subs, uiLang) {
+        subs = subs || [];
+        if (!subs.length) return null;
+        var ui = String(uiLang || '').toLowerCase().split(/[-_]/)[0];
+        var own = subs.filter(function (s) { return !s.loose; });
+        if (!own.length) {
+            if (subs.length === 1) return subs[0];
+            for (var k = 0; k < subs.length; k++)
+                if (ui && matchScore(ui, subs[k].lang, subs[k].name) >= 50) return subs[k];
+            return null;
+        }
+        subs = own;
+        var tagged = null;
+        for (var i = 0; i < subs.length; i++) {
+            var s = subs[i];
+            if (!s.lang) return s;
+            if (!tagged && ui && matchScore(ui, s.lang, '') >= 90) tagged = s;
+        }
+        if (tagged) return tagged;
+        return subs.length === 1 ? subs[0] : null;
+    }
+
+    /* Subtitle file name hints that make a track a worse default: forced
+     * (signs only) and SDH / hearing impaired (sound descriptions). */
+    function isForcedOrSdh(name) {
+        return /(^|[^a-z0-9])(forced|sdh|hi|hearing|cc)([^a-z0-9]|$)/i.test(String(name || ''));
+    }
+    /* Score a subtitle track against one wanted language: the language match
+     * first, then small nudges: .srt/.vtt over .ass/.ssa, a sidecar file over
+     * a track read out of the container, forced/SDH only as a last resort.
+     * 0 means no match. */
+    function subScore(want, lang, name, ext, external) {
+        var sc = matchScore(want, lang, name);
+        if (!sc) return 0;
+        var e = String(ext || '').toLowerCase();
+        if (e === 'srt' || e === 'vtt') sc += 6;
+        else if (e === 'ass' || e === 'ssa') sc += 2;
+        if (external) sc += 15;
+        if (isForcedOrSdh(name)) sc -= 40;
+        return sc < 1 ? 1 : sc;
+    }
+
+    return {
+        subScore: subScore,
+        isForcedOrSdh: isForcedOrSdh,
+        forSubtitle2: function () {
+            return i18nList([{ code: '', name: 'None', nameKey: 'common.none' }].concat(langs.slice(1)));
+        },
+        forAudio:    function () { return i18nList(langs); },
+        forSubtitle: function () {
+            return i18nList([{ code: 'off', name: 'Off (no subtitles)', nameKey: 'lang.off' }].concat(langs));
+        },
+        matchScore:  matchScore,
+        pickAutoSubtitle: pickAutoSubtitle,
+        nameFor:     function (code) {
+            if (code === 'off') return i18nName({ name: 'Off', nameKey: 'common.off' });
+            var e = entryFor(code);
+            return e ? i18nName(e) : (code || i18nName({ name: 'Auto', nameKey: 'common.auto' }));
+        }
+    };
+})();
+
+
+/* Subtitle-appearance options + their resolved CSS values.  Subtitles are
+ * painted by the app into #subtitle-overlay (AVPlay backend, both embedded
+ * and external cues) and by the browser into video::cue (HTML5 fallback),
+ * so apply() drives both surfaces from the saved Settings. */
+var SubtitleStyle = (function () {
+    var SIZE = [
+        { code: 'small',  name: 'Small',       nameKey: 'sub.size.small',  px: 26 },
+        { code: 'medium', name: 'Medium',      nameKey: 'sub.size.medium', px: 36 },
+        { code: 'large',  name: 'Large',       nameKey: 'sub.size.large',  px: 48 },
+        { code: 'xlarge', name: 'Extra large', nameKey: 'sub.size.xlarge', px: 60 }
+    ];
+    var FONT = [
+        { code: 'sans',  name: 'Sans-serif', nameKey: 'sub.font.sans',  css: "'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif" },
+        { code: 'serif', name: 'Serif',      nameKey: 'sub.font.serif', css: "Georgia,'Times New Roman',serif" },
+        { code: 'mono',  name: 'Monospace',  nameKey: 'sub.font.mono',  css: "'Consolas','Courier New',monospace" }
+    ];
+    // The CC colours TVs have offered since teletext: white, and the yellow
+    // most people who grew up with the TV's own subtitle menu are used to
+    // (issue #149).  Pure hues read best over a picture with a dark outline.
+    var COLOR = [
+        { code: 'white',  name: 'White',  nameKey: 'sub.color.white',  css: '#ffffff' },
+        { code: 'yellow', name: 'Yellow', nameKey: 'sub.color.yellow', css: '#ffee00' },
+        { code: 'cyan',   name: 'Cyan',   nameKey: 'sub.color.cyan',   css: '#00f0ff' },
+        { code: 'green',  name: 'Green',  nameKey: 'sub.color.green',  css: '#40ff40' }
+    ];
+    var WEIGHT = [
+        { code: 'normal', name: 'Normal', nameKey: 'sub.weight.normal', css: '500' },
+        { code: 'bold',   name: 'Bold',   nameKey: 'sub.weight.bold',   css: '700' }
+    ];
+    var POSITION = [
+        { code: 'bottom', name: 'Bottom', nameKey: 'sub.pos.bottom' },
+        { code: 'middle', name: 'Middle', nameKey: 'sub.pos.middle' },
+        { code: 'top',    name: 'Top',    nameKey: 'sub.pos.top' }
+    ];
+    var BG = [
+        { code: 'none', name: 'None (outline only)', nameKey: 'sub.bg.none' },
+        { code: 'box',  name: 'Translucent box',     nameKey: 'sub.bg.box' }
+    ];
+
+    var OUTLINE = [
+        { code: 'off',    name: 'Off',         nameKey: 'common.off',        px: 0 },
+        { code: 'thin',   name: 'Thin',        nameKey: 'sub.out.thin',      px: 1 },
+        { code: 'medium', name: 'Medium',      nameKey: 'sub.size.medium',   px: 2 },
+        { code: 'thick',  name: 'Thick',       nameKey: 'sub.out.thick',     px: 3 },
+        { code: 'xthick', name: 'Extra thick', nameKey: 'sub.out.xthick',    px: 5 }
+    ];
+    var SHADOW = [
+        { code: 'off',    name: 'Off',    nameKey: 'common.off',      css: 'none' },
+        { code: 'soft',   name: 'Soft',   nameKey: 'sub.shadow.soft', css: '0 0 4px rgba(0,0,0,.95)' },
+        { code: 'strong', name: 'Strong', nameKey: 'sub.shadow.strong', css: '0 0 6px #000, 0 3px 8px #000, 0 0 12px #000' }
+    ];
+    var OPACITY = [
+        { code: '100', name: '100%', nameKey: 'sub.op.100', val: 1 },
+        { code: '75',  name: '75%',  nameKey: 'sub.op.75',  val: 0.75 },
+        { code: '50',  name: '50%',  nameKey: 'sub.op.50',  val: 0.5 }
+    ];
+    /* Ready-made looks.  Each sets the appearance rows below in one go. */
+    var PRESETS = [
+        { code: 'movie',    name: 'Movie',            nameKey: 'sub.preset.movie',
+          set: { subtitleSize: 'large',  subtitleFont: 'sans', subtitleColor: 'white',  subtitleWeight: 'normal', subtitleBg: 'none', subtitleOutline: 'medium', subtitleShadow: 'soft',   subtitleOpacity: '100' } },
+        { code: 'bold',     name: 'Large and bold',   nameKey: 'sub.preset.bold',
+          set: { subtitleSize: 'xlarge', subtitleFont: 'sans', subtitleColor: 'white',  subtitleWeight: 'bold',   subtitleBg: 'none', subtitleOutline: 'thick',  subtitleShadow: 'strong', subtitleOpacity: '100' } },
+        { code: 'minimal',  name: 'Minimal',          nameKey: 'sub.preset.minimal',
+          set: { subtitleSize: 'small',  subtitleFont: 'sans', subtitleColor: 'white',  subtitleWeight: 'normal', subtitleBg: 'none', subtitleOutline: 'thin',   subtitleShadow: 'off',    subtitleOpacity: '75' } },
+        { code: 'contrast', name: 'High contrast',    nameKey: 'sub.preset.contrast',
+          set: { subtitleSize: 'large',  subtitleFont: 'sans', subtitleColor: 'yellow', subtitleWeight: 'bold',   subtitleBg: 'box',  subtitleOutline: 'xthick', subtitleShadow: 'strong', subtitleOpacity: '100' } }
+    ];
+    var LOOK_KEYS = ['subtitleSize','subtitleFont','subtitleColor','subtitleWeight','subtitleBg','subtitleOutline','subtitleShadow','subtitleOpacity'];
+
+    function find(list, code) {
+        for (var i = 0; i < list.length; i++) if (list[i].code === code) return list[i];
+        return list[0];
+    }
+    function nameFor(group, code) { return i18nName(find(group, code)); }
+    /* The outline is a ring of text shadows (no -webkit-text-stroke: it eats
+     * into thin Arabic letters); px 0 means none. */
+    function outlineShadow(px) {
+        if (!px) return '';
+        var c = 'rgba(0,0,0,.9)', a = [], p = px;
+        var dirs = [[p,0],[-p,0],[0,p],[0,-p],[p,p],[-p,p],[p,-p],[-p,-p]];
+        for (var i = 0; i < dirs.length; i++) a.push(dirs[i][0] + 'px ' + dirs[i][1] + 'px 0 ' + c);
+        return a.join(',');
+    }
+    function shadowCss() {
+        var o = find(OUTLINE, Settings.get('subtitleOutline')), sh = find(SHADOW, Settings.get('subtitleShadow'));
+        var parts = [];
+        var ring = outlineShadow(o.px); if (ring) parts.push(ring);
+        if (sh.css !== 'none') parts.push(sh.css);
+        return parts.length ? parts.join(',') : 'none';
+    }
+    function applyPreset(code) {
+        var p = null;
+        for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i].code === code) p = PRESETS[i];
+        var set = p ? p.set : null;
+        if (code === 'custom') { try { set = JSON.parse(Settings.get('subtitleCustom') || 'null'); } catch (e) { set = null; } }
+        if (!set) return false;
+        for (var k in set) if (Object.prototype.hasOwnProperty.call(set, k)) Settings.set(k, set[k]);
+        apply();
+        return true;
+    }
+    function saveCustom() {
+        var o = {};
+        for (var i = 0; i < LOOK_KEYS.length; i++) o[LOOK_KEYS[i]] = Settings.get(LOOK_KEYS[i]);
+        Settings.set('subtitleCustom', JSON.stringify(o));
+    }
+    function hasCustom() { return !!Settings.get('subtitleCustom'); }
+
+    /* Read the subtitle settings and push them onto the document: CSS custom
+     * properties (consumed by the overlay's .sub-band zones) + a generated
+     * video::cue rule for the HTML5 backend.  Position isn't set here — the
+     * player reads subtitlePosition itself and routes each cue into a band;
+     * ::cue position is driven by the cue's own line setting, not CSS. */
+    function apply() {
+        if (typeof Settings === 'undefined') return;
+        var size  = find(SIZE, Settings.get('subtitleSize'));
+        var font  = find(FONT, Settings.get('subtitleFont'));
+        var color = find(COLOR, Settings.get('subtitleColor'));
+        var wght  = find(WEIGHT, Settings.get('subtitleWeight'));
+        var bg    = Settings.get('subtitleBg');
+
+        var root = document.documentElement;
+        root.style.setProperty('--sub-size', size.px + 'px');
+        root.style.setProperty('--sub-font', font.css);
+        root.style.setProperty('--sub-color', color.css);
+        root.style.setProperty('--sub-weight', wght.css);
+        var shadow = shadowCss();
+        root.style.setProperty('--sub-shadow', shadow);
+        root.style.setProperty('--sub-opacity', String(find(OPACITY, Settings.get('subtitleOpacity')).val));
+
+        var ov = document.getElementById('subtitle-overlay');
+        if (ov) ov.classList.toggle('sub-bg', bg === 'box');
+        /* Position is applied by the player, which reads subtitlePosition
+         * itself, so a live position change has to trigger a repaint to move
+         * an on-screen cue immediately. */
+        if (typeof Player !== 'undefined' && Player.repaintSubtitles) Player.repaintSubtitles();
+
+        // HTML5 <track> rendering: inject/update a ::cue rule.
+        var styleEl = document.getElementById('subtitle-cue-style');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'subtitle-cue-style';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent =
+            'video::cue{' +
+            'font-size:' + size.px + 'px;' +
+            'font-family:' + font.css + ';' +
+            'color:' + color.css + ';' +
+            'font-weight:' + wght.css + ';' +
+            'text-shadow:' + shadow + ';' +
+            (bg === 'box' ? 'background:rgba(0,0,0,.65);'
+                          : 'background:transparent;') +
+            '}';
+    }
+
+    return {
+        forSize:     function () { return i18nList(SIZE); },
+        forFont:     function () { return i18nList(FONT); },
+        forColor:    function () { return i18nList(COLOR); },
+        forWeight:   function () { return i18nList(WEIGHT); },
+        forPosition: function () { return i18nList(POSITION); },
+        forBg:       function () { return i18nList(BG); },
+        forOutline:  function () { return i18nList(OUTLINE); },
+        forShadow:   function () { return i18nList(SHADOW); },
+        forOpacity:  function () { return i18nList(OPACITY); },
+        forPresets:  function () { return i18nList(PRESETS); },
+        nameForOutline: function (c) { return nameFor(OUTLINE, c); },
+        nameForShadow:  function (c) { return nameFor(SHADOW, c); },
+        nameForOpacity: function (c) { return nameFor(OPACITY, c); },
+        applyPreset: applyPreset,
+        saveCustom:  saveCustom,
+        hasCustom:   hasCustom,
+        nameForSize: function (c) { return nameFor(SIZE, c); },
+        nameForFont: function (c) { return nameFor(FONT, c); },
+        nameForColor:  function (c) { return nameFor(COLOR, c); },
+        nameForWeight: function (c) { return nameFor(WEIGHT, c); },
+        nameForPosition: function (c) { return nameFor(POSITION, c); },
+        nameForBg:   function (c) { return nameFor(BG, c); },
+        apply:       apply
+    };
+})();
+
+
+/* The screen the app opens on (issue #149): Home, or one of the Home tiles
+ * opened straight away as if it had been pressed.  `action` is the tile's
+ * data-action, so the list can't drift from what Home offers.  The `old`
+ * ones were tiles until 1.31.0 folded them into Servers: a choice saved
+ * back then still opens the same screen, but the picker no longer offers
+ * them. */
+var StartScreen = (function () {
+    var SCREENS = [
+        { code: 'home',      name: 'Home screen',         nameKey: 'start.home',     action: '' },
+        { code: 'recent',    name: 'Recently Played',     nameKey: 'home.recent',    action: 'browse-recent' },
+        { code: 'favorites', name: 'Favorites',           nameKey: 'home.favorites', action: 'browse-favorites' },
+        { code: 'url',       name: 'Open Network Stream', nameKey: 'home.url',       action: 'open-url' },
+        { code: 'usb',       name: 'Browse USB Drive',    nameKey: 'home.usb',       action: 'browse-usb' },
+        { code: 'servers',   name: 'Servers',             nameKey: 'home.servers',   action: 'browse-servers' },
+        { code: 'smb',       name: 'Browse SMB Share',    nameKey: 'home.smb',       action: 'browse-smb',    old: true },
+        { code: 'dlna',      name: 'Media Servers',       nameKey: 'home.dlna',      action: 'browse-dlna',   old: true },
+        { code: 'webdav',    name: 'WebDAV',              nameKey: 'home.webdav',    action: 'browse-webdav', old: true }
+    ];
+    function find(code) {
+        for (var i = 0; i < SCREENS.length; i++) if (SCREENS[i].code === code) return SCREENS[i];
+        return SCREENS[0];
+    }
+    return {
+        forList: function () { return i18nList(SCREENS.filter(function (s) { return !s.old; })); },
+        find:    find,
+        nameFor: function (c) { return i18nName(find(c)); },
+        /* The Home tile action to fire at launch, or '' for Home itself. */
+        actionFor: function (c) { return find(c).action; }
+    };
+})();
+
+
+/* Video aspect modes — how the picture is fitted to the screen.
+ *
+ * There are three, and the reason there aren't more is worth writing down:
+ * two different kinds of "black bars" exist, and only one of them is the
+ * player's to fix.
+ *
+ *   1. The frame really is wider than the screen (a 2.39:1 frame on a 16:9
+ *      panel).  The firmware letterboxes it, and 'fill' — AVPlay's
+ *      CROPPED_FULL, CSS object-fit:cover — scales the picture until it
+ *      covers the screen and crops the sides instead, aspect preserved.
+ *
+ *   2. The bars are encoded INTO the frames — a 2.39:1 film muxed as 16:9,
+ *      which is what most streaming rips are.  As far as the firmware is
+ *      concerned the frame already matches the panel, so LETTER_BOX,
+ *      CROPPED_FULL and FULL_SCREEN all paint the same picture and none of
+ *      them can change anything.  Cropping bars like that means magnifying
+ *      past the frame edge: a display rect bigger than the screen and
+ *      centred on it.  A centred oversized rect has a negative origin, and
+ *      setDisplayRect "throws InvalidValuesError if any input parameter
+ *      contains a negative value" — Samsung's own AVPlay reference.  The
+ *      picture is always centred in the rect it is handed, so no legal rect
+ *      can push the top bar off the top of the screen, and AVPlay exposes no
+ *      source-crop or ROI call to do it another way.  Zoom and crop modes
+ *      were built and tried on two sets; neither moved a pixel.  They are
+ *      gone, and the player now says why rather than offering a mode that
+ *      cannot work.
+ *
+ * 'stretch' is the blunt instrument — fills the screen by distorting the
+ * picture.  Some users prefer it, so it stays on the list, labelled.
+ *
+ * `av` values are Samsung AVPlay display methods; unsupported ones throw on
+ * older firmware, and player.js falls back to LETTER_BOX when they do. */
+var AspectRatio = (function () {
+    var MODES = [
+        { code: 'fit',     name: 'Fit screen (keep black bars)',    short: 'Fit',
+          nameKey: 'aspect.fit', shortKey: 'aspect.fitShort',
+          av: 'PLAYER_DISPLAY_MODE_LETTER_BOX',   fit: 'contain' },
+        { code: 'fill',    name: 'Fill screen (crop the sides)',    short: 'Fill',
+          nameKey: 'aspect.fill', shortKey: 'aspect.fillShort',
+          av: 'PLAYER_DISPLAY_MODE_CROPPED_FULL', fit: 'cover' },
+        // 'Wide' is the label TVs traditionally put on a stretched 16:9
+        // picture, and unlike 'Stretch' it fits inside the round OSD button.
+        { code: 'stretch', name: 'Stretch (fills, distorts shape)', short: 'Wide',
+          nameKey: 'aspect.stretch', shortKey: 'aspect.stretchShort',
+          av: 'PLAYER_DISPLAY_MODE_FULL_SCREEN',  fit: 'fill' }
+    ];
+
+    function isKnown(code) {
+        for (var i = 0; i < MODES.length; i++) if (MODES[i].code === code) return true;
+        return false;
+    }
+    function find(code) {
+        for (var i = 0; i < MODES.length; i++) if (MODES[i].code === code) return MODES[i];
+        return MODES[0];
+    }
+    /* The mode currently in force, resolved from Settings. */
+    function current() {
+        if (typeof Settings === 'undefined') return MODES[0];
+        return find(Settings.get('aspectMode'));
+    }
+
+    /* Next mode in the list — the OSD button cycles rather than opening a
+     * picker when the user just wants to flick through them. */
+    function next(code) {
+        for (var i = 0; i < MODES.length; i++)
+            if (MODES[i].code === code) return MODES[(i + 1) % MODES.length].code;
+        return MODES[0].code;
+    }
+
+    return {
+        forList: function () { return i18nList(MODES); },
+        find:    find,
+        isKnown: isKnown,
+        current: current,
+        next:    next,
+        nameFor:  function (c) { return i18nName(find(c)); },
+        shortFor: function (c) { return i18nName(find(c), 'short'); }
+    };
+})();
+
+// Ignored by the Tizen/browser build; lets Node tests require these helpers.
+if (typeof module !== 'undefined' && module.exports)
+    module.exports = {
+        Settings:      Settings,
+        LanguageList:  LanguageList,
+        SubtitleStyle: SubtitleStyle,
+        StartScreen:   StartScreen,
+        AspectRatio:   AspectRatio
+    };

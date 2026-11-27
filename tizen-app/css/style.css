@@ -1,0 +1,1810 @@
+/* ────────────────────────────────────────────────────────────────────────
+   Tessel — visual language matching the bundled icon:
+     · deep navy background (same as icon canvas)
+     · white text as primary read colour
+     · sky-blue (#4fc3f7) used as accent — focus rings, brand wordmark,
+       progress fill, primary buttons.  Never as large background surfaces.
+     · everything centred horizontally on a 1920×1080 TV viewed from 3 m
+   ──────────────────────────────────────────────────────────────────────── */
+
+:root {
+    /* Slate-blue palette — same blue family as the icon but lifted out of
+     * pure-navy darkness so text reads comfortably on a TV at 3 m. */
+    --bg:        #1e2a3d;       /* base background, comfortable charcoal-blue */
+    --bg-2:      #283549;       /* subtle elevation step */
+    --bg-3:      #324159;       /* second elevation step */
+    --bg-card:   #2a3854;       /* tile/card surface */
+    --bg-card-h: #3a4a6a;       /* hovered/focused card */
+
+    --fg:        #ffffff;
+    --fg-mute:   #d0dae5;       /* lighter secondary text — easier reading */
+    --fg-dim:    #8da0b8;
+
+    --accent:    #4fc3f7;       /* sky blue from the icon */
+    --accent-2:  #81d4fa;
+    --accent-soft: rgba(79,195,247,.18);
+    --danger:    #ff6b6b;
+
+    --border:    rgba(255,255,255,.08);
+    --shadow:    0 8px 32px rgba(0,0,0,.45);
+    --r:         16px;
+    --r-sm:      10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    /* CRITICAL: body must be black/transparent so AVPlay's hardware video plane
+     * shows through the WebView.  Any opaque background here would cover the
+     * video.  Individual non-player views set their own backgrounds. */
+    background: #000;
+    color: var(--fg);
+    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 26px;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+button:focus { outline: none; }
+
+.hidden { display: none !important; }
+
+/* ── Views: full screen, vertically + horizontally centred contents ────
+ * Each non-player view paints its own opaque background — required because
+ * the body is black (for AVPlay video plane visibility) and we don't want
+ * to see black behind the home/url/browse UIs. */
+.view {
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    padding: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    background: var(--bg);
+}
+
+/* Player view stays transparent so the AVPlay hardware video plane shows
+ * through.  Without this, the body's black would be covered by this view's
+ * background and the video plane would be hidden. */
+#view-player {
+    background: transparent;
+}
+
+/* ── Brand (logo + wordmark) ──────────────────────────────────────── */
+.brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 80px;
+}
+.brand.small { margin-bottom: 48px; }
+
+.brand h1 {
+    margin: 0 0 0 24px;       /* was flex `gap`, swapped for margin for WebKit 537 */
+    font-size: 64px;
+    font-weight: 200;
+    letter-spacing: 2px;
+    color: var(--fg);
+}
+.brand.small h1 { font-size: 40px; }
+
+.brand h1 span {
+    color: var(--accent);
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+/* Brand mark — uses the actual app icon so it always matches the launcher */
+.app-icon {
+    width: 96px; height: 96px;
+    border-radius: 18px;
+    flex-shrink: 0;
+}
+.brand.small .app-icon { width: 56px; height: 56px; border-radius: 12px; }
+
+/* ── Home tiles ───────────────────────────────────────────────────── */
+.home-tiles {
+    display: grid; grid-gap: 16px;   /* grid-gap, not gap: TV WebView is Chromium 63 */
+    /* One 280px column per tile shown — six at most: 6×280 + 5×16 = 1760px,
+     * fits 1080p.  A hidden tile (Recently Played off, Servers with network
+     * access off) takes no column, and the rest stay centred. */
+    grid-auto-flow: column; grid-auto-columns: 280px;
+    justify-content: center;
+}
+
+.tile {
+    background: var(--bg-card);
+    border: 3px solid var(--border);
+    border-radius: var(--r);
+    padding: 64px 16px;   /* six tiles since the Servers tile: 280px leaves ~240px for a label */
+    text-align: center;
+    transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    color: var(--fg);
+}
+
+.tile:focus, .tile.focused {
+    border-color: var(--accent);
+    background: var(--bg-card-h);
+    transform: scale(1.05) translateY(-4px);
+    box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft);
+}
+
+.tile-icon {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--fg);
+    background: var(--accent-soft);
+    border: 2px solid var(--accent);
+    width: 96px; height: 96px;
+    line-height: 92px;
+    border-radius: 24px;
+    margin: 0 auto 28px;
+    letter-spacing: 1px;
+}
+.tile:focus .tile-icon, .tile.focused .tile-icon {
+    background: var(--accent);
+    color: #102035;
+}
+
+.tile-label {
+    font-size: 24px;          /* 26px broke "Netzwerkstream" mid-word back when the tile was 216px */
+    word-break: break-word;   /* a single long word (ru "Медиасерверы") wraps rather than spills */
+    font-weight: 500;
+    color: var(--fg);
+    margin-bottom: 10px;
+}
+.tile-sub {
+    font-size: 18px;
+    color: var(--fg-mute);
+    line-height: 1.4;
+}
+
+/* ── URL input view ───────────────────────────────────────────────── */
+.url-input-wrap {
+    width: 100%;
+    max-width: 1080px;
+    text-align: center;
+}
+.url-input-wrap label {
+    display: block;
+    font-size: 18px;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+}
+.url-input-wrap input {
+    width: 100%;
+    background: var(--bg-card);
+    color: var(--fg);
+    font: inherit;
+    font-size: 26px;
+    border: 3px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 22px 28px;
+    text-align: center;
+    transition: border-color .15s ease, background .15s ease;
+}
+.url-input-wrap input::placeholder { color: var(--fg-dim); }
+.url-input-wrap input:focus, .url-input-wrap input.focused {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--bg-card-h);
+    box-shadow: 0 0 0 6px var(--accent-soft);
+}
+
+.presets {
+    margin-top: 40px;
+    width: 100%;
+    max-width: 1080px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.presets-label {
+    width: 100%;
+    font-size: 16px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 14px;
+}
+.preset {
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: 999px;
+    padding: 12px 28px;
+    font-size: 18px;
+    color: var(--fg-mute);
+    margin: 7px;     /* spacing instead of flex gap */
+    transition: border-color .15s, color .15s, background .15s;
+}
+.preset:focus, .preset.focused {
+    border-color: var(--accent);
+    color: var(--fg);
+    background: var(--bg-card-h);
+}
+
+/* Saved streams (issue #119): a chip that plays, and a ⋯ chip beside it for
+ * the rest.  A long list scrolls inside its own box so Play and the samples
+ * stay on screen; focusing a chip scrolls it into view. */
+.saved-streams { margin-top: 32px; }
+.saved-streams-list {
+    width: 100%;
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.saved-item { display: inline-flex; align-items: center; margin: 7px; }
+.saved-item .preset { margin: 0; max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-item .saved-more { margin-left: 6px; padding: 12px 18px; }
+
+/* The name/URL form takes the screen while it's open. */
+.saved-edit { display: none; width: 100%; max-width: 1080px; flex-direction: column; align-items: center; }
+.saved-edit .url-input-wrap + .url-input-wrap { margin-top: 28px; }
+#view-url.editing .saved-edit { display: flex; }
+#view-url.editing > :not(.brand):not(.saved-edit) { display: none; }
+
+.actions {
+    display: flex;
+    margin-top: 48px;
+    justify-content: center;
+}
+.actions > .btn + .btn { margin-left: 24px; }
+
+.btn {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    padding: 18px 56px;
+    font-size: 22px;
+    font-weight: 500;
+    transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease;
+}
+.btn.primary {
+    /* Resting primary: a faint tint + accent label, so it reads as the main
+     * action WITHOUT looking like the solid accent focus highlight. */
+    background: var(--accent-soft);
+    color: var(--accent-2);
+    font-weight: 600;
+}
+.btn.primary:focus, .btn.primary.focused {
+    /* Solid fill + glow only when it actually has focus. */
+    background: var(--accent);
+    color: #102035;
+    transform: scale(1.04);
+    box-shadow: 0 0 0 6px var(--accent-soft);
+}
+.btn.ghost {
+    background: var(--bg-card);
+    color: var(--fg);
+    border-color: var(--border);
+}
+.btn.ghost:focus, .btn.ghost.focused {
+    border-color: var(--accent);
+    background: var(--bg-card-h);
+    transform: scale(1.04);
+}
+
+/* ── File browser ─────────────────────────────────────────────────── */
+#view-browse {
+    /* Browser needs the full width for the list; centre the container only */
+    justify-content: flex-start;
+}
+.browse-path {
+    color: var(--fg-mute);
+    font-size: 20px;
+    margin-bottom: 16px;
+    word-break: break-all;
+    width: 100%;
+    max-width: 1400px;
+    text-align: left;
+}
+.browse-list {
+    flex: 1;
+    width: 100%;
+    max-width: 1400px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    text-align: left;
+}
+.browse-list li {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    transition: background .12s ease, border-left .12s ease;
+    color: var(--fg);
+    font-size: 22px;
+}
+.browse-list li > * + * { margin-left: 24px; }
+.browse-list li:last-child { border-bottom: 0; }
+.browse-list li.focused {
+    background: var(--accent-soft);
+    border-left: 6px solid var(--accent);
+    padding-left: 26px;
+}
+.browse-list .icon {
+    width: 36px; flex: 0 0 36px;
+    text-align: center;
+    font-size: 22px;
+    color: var(--accent);
+}
+.browse-list .name { flex: 1; }
+.browse-list .meta {
+    color: var(--fg-mute);
+    font-size: 18px;
+    flex-shrink: 0;
+}
+/* Watched file: the icon becomes a check and the row is dimmed, so
+ * unwatched episodes stand out in a series folder. */
+.browse-list li.watched-item > * { opacity: .5; }
+.browse-list li.watched-item .icon { color: var(--fg-mute); }
+/* Duration column; a fixed width keeps the size column aligned. */
+.browse-list .length { min-width: 72px; text-align: right; }
+/* Progress bar under the name of a partly watched file. */
+.browse-list .progress {
+    display: block;
+    height: 4px;
+    margin-top: 8px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.browse-list .progress i { display: block; height: 100%; background: var(--accent); }
+/* Playlist filter (issue #122), above the list. */
+.playlist-filter { width: 100%; max-width: 1400px; margin-bottom: 16px; }
+.playlist-filter input {
+    width: 100%;
+    background: var(--bg-card);
+    color: var(--fg);
+    font: inherit;
+    font-size: 22px;
+    border: 2px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 14px 24px;
+}
+.playlist-filter input::placeholder { color: var(--fg-dim); }
+.playlist-filter input:focus, .playlist-filter input.focused {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--bg-card-h);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+/* Channel logos (issue #123): a fixed box so rows don't shift when one
+ * arrives; the plain icon shows until it has loaded. */
+.browse-list .channel-icon { width: 64px; flex: 0 0 64px; height: 40px; display: flex; align-items: center; justify-content: center; }
+.browse-list .channel-icon img { display: none; max-width: 64px; max-height: 40px; object-fit: contain; }
+.browse-list .channel-icon.has-logo img { display: block; }
+.browse-list .channel-icon.has-logo .glyph { display: none; }
+/* A playlist channel that is on Saved streams (issue #121). */
+.browse-list .saved-mark { display: none; flex-shrink: 0; color: var(--accent); font-size: 22px; }
+.browse-list li.is-saved .saved-mark { display: inline; }
+/* A folder pinned to Favorites (issue #140). */
+.browse-list .fav-mark { display: none; flex-shrink: 0; color: var(--accent); font-size: 22px; }
+.browse-list li.is-fav .fav-mark { display: inline; }
+
+/* ── Player ───────────────────────────────────────────────────────── */
+#player-object {
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    width: 100%; height: 100%;
+    background: transparent;  /* let video plane show; body underneath is black */
+}
+
+#html5-video {
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #000;
+    display: none;  /* shown only when playing a local file */
+}
+
+/* AVPlay subtitle overlay — for embedded text/subtitle tracks selected via
+ * the CC menu.  AVPlay fires onsubtitlechange(duration, text, ...) and we
+ * paint into this element.  HTML5 <track> handles its own rendering. */
+/* Size, font and colour come from the user's Settings via CSS custom
+ * properties set in SubtitleStyle.apply(); the background box comes from the
+ * sub-bg class toggled on this element.  Position is not a class here — the
+ * player routes each cue into one of the .sub-band zones below (an
+ * unpositioned cue follows the subtitlePosition setting).  Defaults below
+ * match the medium/sans/none preset so the overlay looks right even before
+ * apply() runs. */
+/* The overlay fills the video area; its three bands do the positioning so a
+ * \an-placed sign and the bottom dialogue can show at the same time. */
+#subtitle-overlay {
+    position: absolute;
+    left: 0; right: 0; top: 0; bottom: 0;
+    pointer-events: none;
+    /* Bumped from 50 to 80 — the OSDs have no explicit z-index (auto/0)
+     * but on Tizen Chromium 63 they appear to obscure the overlay anyway.
+     * 80 keeps it below the pickers (200) and toast (1000). */
+    z-index: 80;
+}
+/* One band per vertical zone.  Font, colour and the outline shadow live here
+ * (read from the --sub-* custom properties the Settings panel sets) so every
+ * .sub-line inherits them.  A column flexbox stacks cues that share a band. */
+.sub-band {
+    position: absolute;
+    left: 8%; right: 8%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    color: var(--sub-color, #fff);
+    font-size: var(--sub-size, 36px);
+    font-family: var(--sub-font, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif);
+    font-weight: var(--sub-weight, 500);
+    line-height: 1.3;
+    text-shadow: var(--sub-shadow,
+         0 0 4px rgba(0,0,0,.95),
+         2px 2px 0 rgba(0,0,0,.85),
+        -2px 2px 0 rgba(0,0,0,.85),
+         2px -2px 0 rgba(0,0,0,.85),
+        -2px -2px 0 rgba(0,0,0,.85));
+    opacity: var(--sub-opacity, 1);
+}
+.sub-band-top    { top: 8%; }
+.sub-band-middle { top: 50%; transform: translateY(-50%); }
+.sub-band-bottom { bottom: 8%; justify-content: flex-end; }
+
+/* The cue text lives in a .sub-line span so a translucent box (when enabled)
+ * hugs the text instead of spanning the full 8%-to-8% band width. */
+#subtitle-overlay .sub-line {
+    /* inline-block is more reliable than inline on Tizen Chromium 63 for
+     * text-align:center containers — pure inline spans sometimes rendered
+     * invisibly there. */
+    display: inline-block;
+    max-width: 100%;
+    white-space: pre-line;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+}
+/* Gap between cues stacked in the same band. */
+#subtitle-overlay .sub-line + .sub-line { margin-top: .15em; }
+#subtitle-overlay.sub-bg .sub-line {
+    background: rgba(0,0,0,.65);
+    padding: .08em .35em;
+    border-radius: 6px;
+    /* Outline is redundant over a solid box — drop the heavy shadow there. */
+    text-shadow: 0 0 3px rgba(0,0,0,.8);
+}
+
+#view-player {
+    padding: 0;
+    pointer-events: none;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.osd {
+    position: absolute; left: 0; right: 0;
+    color: var(--fg);
+    pointer-events: auto;
+    transition: opacity .25s ease;
+}
+.osd-top {
+    top: 0;
+    padding: 32px 60px 100px;
+    background: linear-gradient(180deg, rgba(0,0,0,.85), rgba(0,0,0,0));
+    text-align: left;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+}
+.osd-bottom {
+    bottom: 0;
+    padding: 100px 60px 48px;
+    background: linear-gradient(0deg, rgba(0,0,0,.92), rgba(0,0,0,0));
+}
+
+#osd-title {
+    font-size: 28px;
+    font-weight: 500;
+}
+
+.time {
+    display: flex;
+    align-items: center;
+    margin-bottom: 32px;
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    color: var(--fg);
+    position: relative;   /* anchors the floating scrub-delta label */
+}
+.time > * + * { margin-left: 24px; }
+.progress-track {
+    flex: 1;
+    height: 6px;
+    background: rgba(255,255,255,.18);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%; width: 0%;
+    background: var(--accent);
+    transition: width .25s linear;
+}
+/* Scrub mode: the fill previews the seek destination, so it must track key
+ * repeats instantly (no easing) and read as "not the real position yet". */
+.progress-fill.scrubbing {
+    transition: none;
+    background: #fff;
+}
+/* Floats above the time row: it must NOT take part in the flex layout, or
+ * showing/hiding it resizes the progress track and the fill tip jumps
+ * sideways at commit even though the percentage is unchanged. */
+.scrub-delta {
+    position: absolute;
+    left: 0;
+    bottom: 100%;
+    margin: 0 0 10px;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.controls > .ctrl + .ctrl { margin-left: 20px; }
+
+/* Visual separator pushes Stop apart from the playback / track controls so
+ * an accidental over-press from play-pause can't land on it. */
+.ctrl-sep {
+    display: inline-block;
+    width: 1px;
+    height: 56px;
+    margin: 0 28px;
+    background: rgba(255,255,255,.12);
+}
+.ctrl {
+    background: rgba(255,255,255,.08);
+    border: 3px solid transparent;
+    border-radius: 50%;
+    width: 64px; height: 64px;
+    font-size: 24px;
+    color: var(--fg);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color .15s ease, background .15s ease, transform .15s;
+}
+.ctrl.big {
+    width: 96px; height: 96px;
+    font-size: 36px;
+    background: var(--accent);
+    color: #102035;
+}
+.ctrl:focus, .ctrl.focused {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: scale(1.06);
+}
+.ctrl.big:focus, .ctrl.big.focused {
+    background: var(--accent-2);
+    border-color: var(--accent-2);
+}
+/* Prev/Next greyed out when there's no sibling in that direction.  Stays
+ * focusable so the remote doesn't get stuck skipping over it. */
+.ctrl.disabled { opacity: .35; }
+
+/* ── Spinner ──────────────────────────────────────────────────────── */
+.spinner {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: auto;
+}
+.spinner-ring {
+    width: 80px; height: 80px;
+    border: 6px solid rgba(255,255,255,.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    margin: 0 auto 24px;
+    animation: spin 1s linear infinite;
+}
+.spinner-text { font-size: 24px; color: var(--fg-mute); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Error overlay ────────────────────────────────────────────────── */
+.error-overlay {
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(10,20,35,.96);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 80px;
+    pointer-events: auto;
+    text-align: center;
+    z-index: 100;  /* keep above OSDs so the "Back" button is clickable */
+}
+.error-overlay > * + * { margin-top: 24px; }
+
+/* Big yellow warning icon for visibility, white message text for readability,
+ * muted secondary line for the codec hint.  Red on navy was too low contrast. */
+.error-icon {
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    border: 4px solid var(--accent);
+    color: var(--accent);
+    font-size: 56px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+}
+.error-title {
+    font-size: 36px;
+    font-weight: 500;
+    color: var(--fg);
+    max-width: 1200px;
+}
+.error-hint {
+    font-size: 20px;
+    color: var(--fg-mute);
+    max-width: 1000px;
+    line-height: 1.5;
+    white-space: pre-line;  /* respect \n in the hint text so ffmpeg cmds are on their own lines */
+    text-align: left;
+}
+/* Legacy — kept in case any pre-update DOM still references it */
+.error-msg {
+    font-size: 26px;
+    color: var(--fg);
+    max-width: 1100px;
+    line-height: 1.4;
+}
+
+/* ── Track menu ───────────────────────────────────────────────────── */
+.track-menu {
+    position: absolute; right: 60px; bottom: 240px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 32px;
+    min-width: 480px;
+    max-width: 600px;
+    /* Grows upward from bottom:240px, so cap it well short of the top of
+     * the screen.  Rips with 20+ subtitle tracks used to push the first
+     * entries off-screen where the D-pad could reach them but nothing was
+     * visible; the list now scrolls inside .track-menu-body instead. */
+    max-height: calc(100vh - 320px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow);
+    pointer-events: auto;
+    text-align: left;
+}
+.track-menu-body {
+    flex: 1 1 auto;
+    min-height: 0;              /* required for a flex child to actually scroll */
+    overflow-y: auto;
+    /* Room for the focus ring on the right-hand edge of a focused row. */
+    padding-right: 6px;
+}
+/* The scrollbar is decoration on a TV — nobody drags it — but a visible
+ * track is the only cue that there's more list below. */
+.track-menu-body::-webkit-scrollbar { width: 8px; }
+.track-menu-body::-webkit-scrollbar-thumb {
+    background: var(--bg-3);
+    border-radius: 4px;
+}
+.track-menu h2 {
+    margin: 0 0 20px;
+    font-size: 24px;
+    font-weight: 500;
+}
+.track-section { margin-bottom: 24px; }
+.track-section h3 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+.track-section ul { list-style: none; margin: 0; padding: 0; }
+.track-section li {
+    padding: 12px 18px;
+    border-radius: 8px;
+    transition: background .12s ease;
+    color: var(--fg);
+}
+.track-section li.focused { background: var(--accent-soft); }
+.track-section li.active::before {
+    content: '✓ ';
+    color: var(--accent);
+    font-weight: 700;
+}
+.track-section li.muted { color: var(--fg-dim); font-style: italic; }
+/* Subtitle style rows in the CC menu (issue #149): the setting's name on
+ * the left, its current value on the right, like a Settings row. */
+.track-section li.style-row { display: flex; justify-content: space-between; gap: 24px; }
+.track-section li.style-row .style-value { color: var(--accent); font-weight: 500; white-space: nowrap; }
+
+/* INFO panel (issue #128): label / value rows in the track menu's box. */
+.file-info dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 12px 28px;
+    margin: 0 0 8px;
+    font-size: 20px;
+}
+.file-info dt { color: var(--fg-mute); }
+.file-info dd { margin: 0; }
+.file-info dd.warn { color: #ffb74d; }
+
+/* ── Hints / footer ───────────────────────────────────────────────── */
+.hint {
+    margin-top: 48px;
+    color: var(--fg-mute);
+    font-size: 18px;
+}
+.key {
+    display: inline-block;
+    background: var(--bg-3);
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-family: 'Consolas', monospace;
+    color: var(--fg);
+    font-size: 16px;
+    margin: 0 4px;
+}
+
+/* Word/percentage labels ("Fit", "125%") in the round OSD buttons need a
+ * smaller type size than the glyph controls to stay inside the circle. */
+.ctrl.ctrl-text { font-size: 18px; }
+
+/* ── Repeat / shuffle / aspect buttons (active state highlight) ──── */
+.ctrl.repeat-on,
+.ctrl.shuffle-on,
+.ctrl.aspect-on {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.ctrl.repeat-one::after {
+    content: '1';
+    position: absolute;
+    top: -2px; right: -2px;
+    width: 18px; height: 18px;
+    line-height: 18px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 12px; font-weight: 700;
+    border-radius: 50%;
+}
+.ctrl { position: relative; }   /* needed for the badge above */
+
+/* ── Settings view ───────────────────────────────────────────────── */
+#view-settings {
+    justify-content: flex-start;
+    align-items: center;
+}
+.settings-content {
+    width: 100%;
+    max-width: 1100px;
+    text-align: left;
+    overflow-y: auto;
+    padding-bottom: 40px;
+    /* Hard-cap the scroll-region height so the TV-info panel always overflows
+     * and the Down-arrow scroll handler has something to scroll into.  Tuned
+     * for 1080p (window.innerHeight = 1080) but works fine on smaller too. */
+    height: calc(100vh - 260px);
+    /* Hide the native scrollbar — we navigate via remote, not pointer. */
+    scrollbar-width: none;
+}
+.settings-content::-webkit-scrollbar { display: none; }
+.settings-group {
+    margin-bottom: 40px;
+}
+.settings-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 28px;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+    border: 3px solid var(--border);
+    border-radius: var(--r);
+    color: var(--fg);
+    text-align: left;
+    transition: border-color .15s ease, background .15s ease;
+}
+.settings-row:focus, .settings-row.focused {
+    border-color: var(--accent);
+    background: var(--bg-card-h);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.settings-label { font-size: 24px; }
+
+/* SMB text fields: stack the label above a full-width input so the focusable
+ * <input> shares the same horizontal centre as the full-width button rows.
+ * The D-pad nav is geometric and penalises horizontal offset, so a narrow
+ * right-aligned input gets skipped over — a centred, full-width one doesn't. */
+.settings-row-input {
+    flex-direction: column;
+    align-items: stretch;
+}
+.settings-row-input .settings-label { margin-bottom: 12px; }
+.settings-row-input input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 22px;
+    padding: 12px 16px;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--fg);
+}
+.settings-row-input:focus-within,
+.settings-row-input input:focus,
+.settings-row-input input.focused {
+    border-color: var(--accent);
+    outline: none;
+}
+.settings-value {
+    font-size: 20px;
+    color: var(--accent);
+    font-weight: 500;
+}
+.settings-section-title {
+    margin: 20px 0 16px;
+    font-size: 22px;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 500;
+}
+
+/* Collapsible section header — looks like the bare h2 above, but is a
+ * focusable button so D-pad navigation can expand the group on press.
+ * Sections containing text-input rows (SMB, Debug logging) are collapsed
+ * by default so passing them with the D-pad doesn't pop the on-screen
+ * keyboard for every input on the way past — that was the trigger for
+ * the lag / crash described in issue #28. */
+.settings-section-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    margin: 20px 0 16px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: var(--r);
+    color: var(--fg-mute);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.settings-section-toggle .settings-section-title { margin: 0; }
+.settings-section-toggle:focus,
+.settings-section-toggle.focused {
+    border-color: var(--accent);
+    background: var(--bg-card);
+    color: var(--fg);
+    outline: none;
+    box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.settings-section-chev {
+    font-size: 20px;
+    color: var(--fg-dim);
+    transition: transform .15s ease;
+    margin-left: 16px;
+}
+/* Expanded state (default rendering of an open <button aria-expanded="true">) */
+.settings-section-toggle[aria-expanded="true"] .settings-section-chev {
+    transform: rotate(90deg);
+}
+
+/* Hide the collapsed group entirely.  display:none means descendants have
+ * offsetParent === null, which the UI focus filter (ui.js:48) treats as
+ * non-focusable — exactly what we want, the keyboard never gets a chance
+ * to pop for hidden inputs. */
+.settings-group.is-collapsed { display: none; }
+
+/* TV info table */
+.tvinfo {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 24px 28px;
+    font-size: 19px;
+    line-height: 1.6;
+}
+.tvinfo .row {
+    display: flex;
+    align-items: baseline;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+.tvinfo .row:last-child { border-bottom: 0; }
+.tvinfo .k { flex: 0 0 220px; color: var(--fg-mute); }
+.tvinfo .v { flex: 1; color: var(--fg); word-break: break-all; }
+.tvinfo h3 {
+    margin: 18px 0 8px;
+    font-size: 18px;
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 500;
+}
+/* 2-column grid for the codec list — twice the density so everything fits
+ * on a 1080p screen without needing to scroll. */
+.tvinfo .codecs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-column-gap: 28px;   /* grid-column-gap for Chromium 63 */
+}
+.tvinfo .codec {
+    display: flex;
+    padding: 4px 0;
+    font-size: 18px;
+}
+.tvinfo .codec .name { flex: 0 0 160px; color: var(--fg-mute); }
+.tvinfo .codec .status.ok    { color: #6ad06a; }
+.tvinfo .codec .status.maybe { color: var(--accent-2); }
+.tvinfo .codec .status.no    { color: var(--danger); }
+
+/* Info blocks with a QR code (cast a link, About) */
+.support-block {
+    display: flex;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 24px 28px;
+    margin-bottom: 24px;
+}
+.support-qr {
+    flex: 0 0 200px;
+    width: 200px;
+    height: 200px;
+    background: #fff;       /* keep QR readable on dark surfaces */
+    padding: 10px;
+    border-radius: 12px;
+    image-rendering: pixelated;
+    margin-right: 32px;     /* flex `gap` is unsupported on the TV WebView (Chromium 63) */
+}
+.support-text { flex: 1; }
+.support-headline {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 6px;
+}
+.support-hint {
+    font-size: 18px;
+    color: var(--fg-mute);
+    line-height: 1.5;
+}
+
+/* ── Picker overlay (settings options, modal) ────────────────────── */
+.picker {
+    position: fixed;
+    top: 10%; left: 50%;
+    transform: translateX(-50%);
+    width: 600px; max-width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: var(--r);
+    padding: 32px;
+    box-shadow: var(--shadow);
+    z-index: 200;
+    text-align: left;
+}
+.picker h2 {
+    margin: 0 0 20px;
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--fg);
+}
+.picker ul {
+    list-style: none; margin: 0 0 20px; padding: 0;
+}
+.picker li {
+    padding: 14px 18px;
+    border-radius: 8px;
+    color: var(--fg);
+    transition: background .12s ease;
+    cursor: pointer;
+}
+.picker li.focused { background: var(--accent-soft); }
+.picker li.active::before {
+    content: '✓ ';
+    color: var(--accent);
+    font-weight: 700;
+}
+
+/* ── Toast ────────────────────────────────────────────────────────── */
+.toast {
+    position: fixed;
+    bottom: 60px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-3);
+    color: var(--fg);
+    padding: 16px 36px;
+    border-radius: 999px;
+    font-size: 20px;
+    box-shadow: var(--shadow);
+    z-index: 1000;
+    border: 1px solid var(--border);
+}
+
+/* ── URL-drop pairing hint (network view) ───────────────────────────── */
+.url-drop-hint {
+    margin: 14px 2px 0;
+    color: #8499b3;
+    font-size: 17px;
+    line-height: 1.5;
+}
+.url-drop-hint b { color: #ff8800; font-weight: 600; word-break: break-all; }
+.url-drop-hint:empty { display: none; }
+
+/* ── Pairing block (Settings → Cast from another device) ─────────────── */
+.cast-hint {
+    font-size: 22px;
+    color: var(--fg-mute);
+    line-height: 1.7;       /* doubles as spacing between the two lines */
+}
+.pair-emph {
+    color: var(--accent);
+    font-family: 'Consolas', monospace;
+    word-break: break-all;
+}
+#pair-qr { display: flex; align-items: center; justify-content: center; }
+#pair-qr img { display: block; border-radius: 4px; }
+
+/* ── Picture viewer ───────────────────────────────────────────────── */
+#view-image {
+    background: #000;
+    padding: 0;
+}
+#image-el {
+    max-width: 100%;
+    max-height: 100%;
+    transition: transform .2s ease;
+}
+/* Turned a quarter, the picture's width runs up the screen. */
+#image-el.sideways {
+    max-width: 100vh;
+    max-height: 100vw;
+}
+#image-el.loading { visibility: hidden; }
+.image-status {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--fg-mute);
+    font-size: 26px;
+}
+.image-bar {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 28px 60px 36px;
+    background: linear-gradient(to top, rgba(0,0,0,.85), rgba(0,0,0,0));
+    text-align: left;
+}
+.image-caption { font-size: 26px; margin-bottom: 12px; }
+.image-info { color: var(--fg-mute); font-size: 20px; margin-left: 24px; }
+.image-keys { color: var(--fg-mute); font-size: 18px; }
+
+/* ── Text viewer ──────────────────────────────────────────────────── */
+#view-text {
+    justify-content: flex-start;
+    padding: 48px 60px 36px;
+}
+.text-head {
+    width: 100%;
+    max-width: 1700px;
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 16px;
+    text-align: left;
+}
+.text-name { flex: 1; font-size: 28px; word-break: break-all; }
+.text-info { color: var(--fg-mute); font-size: 18px; margin-left: 24px; flex-shrink: 0; }
+.text-body {
+    flex: 1;
+    width: 100%;
+    max-width: 1700px;
+    overflow: hidden;           /* scrolled by the remote, not a scrollbar */
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    text-align: left;
+}
+#text-pre {
+    margin: 0;
+    padding: 24px 32px;
+    font-family: 'Consolas', 'DejaVu Sans Mono', monospace;
+    font-size: 24px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--fg);
+    user-select: text;
+}
+#text-pre.muted { color: var(--fg-mute); }
+#view-text .hint { margin-top: 20px; }
+
+/* ── Audio-only playback ──────────────────────────────────────────── */
+.audio-card {
+    position: absolute; left: 50%; top: 42%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    max-width: 70%;            /* leaves room for the drift below */
+    animation: audio-drift 900s ease-in-out infinite;
+}
+/* Music can play for hours with no key pressed, and AVPlay keeps the TV's
+ * own screensaver away while it plays, so the cover and text would sit
+ * still on an OLED panel (issue #115).  Drift them slowly round the
+ * screen instead — about 2px a second, too slow to notice.  The range
+ * keeps the card clear of the screen edges and the bottom OSD. */
+@keyframes audio-drift {
+    0%, 100% { transform: translate(-50%, -50%) translate(0, 0); }
+    20%      { transform: translate(-50%, -50%) translate(-240px, -70px); }
+    40%      { transform: translate(-50%, -50%) translate(160px, 20px); }
+    60%      { transform: translate(-50%, -50%) translate(240px, -40px); }
+    80%      { transform: translate(-50%, -50%) translate(-180px, 25px); }
+}
+.audio-note {
+    width: 200px; height: 200px;
+    margin: 0 auto 36px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 4px solid var(--accent);
+    color: var(--accent);
+    font-size: 110px;
+    line-height: 200px;
+}
+.audio-title { font-size: 34px; color: var(--fg); word-break: break-word; }
+.audio-art {
+    display: block;
+    width: 360px; height: 360px;
+    margin: 0 auto 36px;
+    object-fit: cover;
+    border-radius: var(--r);
+    box-shadow: var(--shadow);
+}
+.audio-sub { margin-top: 12px; font-size: 26px; color: var(--fg-mute); word-break: break-word; }
+
+/* Listed, but nothing in the app opens it. */
+.browse-list li.unopenable .name,
+.browse-list li.unopenable .icon { opacity: .55; }
+
+/* ── Mini-player ──────────────────────────────────────────────────── */
+.mini-player {
+    position: fixed; right: 36px; bottom: 36px;
+    width: 600px;
+    display: flex; align-items: center;
+    padding: 16px 20px;
+    background: rgba(20, 30, 46, .96);
+    border: 2px solid var(--accent);
+    border-radius: var(--r);
+    box-shadow: var(--shadow);
+    z-index: 90;               /* above the views, below the toast */
+    text-align: left;
+    animation: mini-drift 600s ease-in-out infinite;
+}
+/* Same idea as audio-drift, in a smaller box: it only moves inwards from
+ * its corner so it never slides off screen. */
+@keyframes mini-drift {
+    0%, 100% { transform: translate(0, 0); }
+    25%      { transform: translate(-28px, -12px); }
+    50%      { transform: translate(-8px, -28px); }
+    75%      { transform: translate(-24px, -4px); }
+}
+.mini-art, .mini-note {
+    width: 96px; height: 96px; flex: 0 0 96px;
+    border-radius: var(--r-sm);
+    object-fit: cover;
+}
+.mini-note {
+    background: var(--bg-card);
+    color: var(--accent);
+    font-size: 52px; line-height: 96px; text-align: center;
+}
+.mini-text { flex: 1; min-width: 0; margin-left: 20px; }
+.mini-title, .mini-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-title { font-size: 24px; }
+.mini-sub { font-size: 18px; color: var(--fg-mute); margin-top: 2px; }
+.mini-track { height: 6px; margin: 10px 0 8px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+.mini-fill { height: 100%; width: 0; background: var(--accent); }
+.mini-keys { font-size: 14px; color: var(--fg-mute); }
+.mini-keys .key { font-size: 12px; padding: 2px 6px; margin: 0 2px; }
+.mini-state { font-size: 32px; color: var(--accent); margin-left: 16px; flex-shrink: 0; }
+.browse-list li.now-playing .name { color: var(--accent); }
+.browse-list li.now-playing::after { content: '♪'; color: var(--accent); margin-left: 24px; font-size: 24px; }
+/* Room under the last row, so it can scroll clear of the mini-player. */
+.mini-on .browse-list { padding-bottom: 120px; }
+
+
+/* ═══ Megatron: folder view modes (USB browser) ═══════════════════════
+ * #browse-list gets one of .vm-details / .vm-list / .vm-large /
+ * .vm-small / .vm-tiles (js/app.js, applyBrowseView).  Every row carries
+ * every column; the rules below pick which ones each view shows.
+ * Flexbox rather than grid, so older TV browsers cope too. */
+.browse-list[class*="vm-"] .meta { display: none; }
+.browse-list .name { min-width: 0; }
+
+/* Column titles above the Details view. */
+.browse-head {
+    display: none;
+    width: 100%; max-width: 1400px; box-sizing: border-box;
+    padding: 10px 32px;
+    color: var(--fg-dim); font-size: 16px; letter-spacing: .08em; text-transform: uppercase;
+    text-align: left; align-items: center;
+}
+.browse-head.on { display: flex; }
+.browse-head > * + * { margin-left: 24px; }
+.browse-head .icon { width: 36px; flex: 0 0 36px; }
+.browse-head .name { flex: 1; min-width: 0; }
+.browse-head .meta { display: block; flex-shrink: 0; }
+
+/* ── Details ── */
+.vm-details li { padding: 14px 32px; font-size: 21px; }
+.vm-details li.focused { padding-left: 26px; }
+.vm-details .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-details .progress { display: none; }
+.vm-details .meta, .browse-head .meta { text-align: left; }
+.vm-details .c-date, .browse-head .c-date { display: block; width: 190px; flex: 0 0 190px; }
+.vm-details .c-type, .browse-head .c-type { display: block; width: 84px;  flex: 0 0 84px; }
+.vm-details .length, .browse-head .length { display: block; width: 84px;  flex: 0 0 84px; min-width: 0; text-align: right; }
+.vm-details .c-size, .browse-head .c-size { display: block; width: 104px; flex: 0 0 104px; text-align: right; }
+.vm-details .c-seen, .browse-head .c-seen { display: block; width: 72px;  flex: 0 0 72px; text-align: right; }
+.vm-details .c-cc { display: none; }
+
+/* ── List: one compact column of names ── */
+.vm-list li { padding: 9px 28px; font-size: 22px; }
+.vm-list li.focused { padding-left: 22px; }
+.vm-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-list .progress { display: none; }
+
+/* ── The three icon views share a tile layout ── */
+.browse-list.vm-large, .browse-list.vm-small, .browse-list.vm-tiles {
+    display: flex; flex-wrap: wrap; align-content: flex-start;
+    padding: 12px;
+}
+.vm-large li, .vm-small li, .vm-tiles li {
+    position: relative; box-sizing: border-box;
+    margin: 8px; border: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    border-radius: 14px; background: rgba(255,255,255,.04);
+    transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+.vm-large li:last-child, .vm-small li:last-child, .vm-tiles li:last-child { border-bottom: 1px solid var(--border); }
+.vm-large li > * + *, .vm-small li > * + *, .vm-tiles li > * + * { margin-left: 0; }
+.vm-large li.focused, .vm-small li.focused, .vm-tiles li.focused {
+    border-left: 1px solid var(--accent);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 4px var(--accent);
+    transform: scale(1.03);
+    z-index: 2;
+}
+.vm-large .fav-mark, .vm-small .fav-mark, .vm-tiles .fav-mark { position: absolute; top: 8px; right: 12px; }
+.vm-large li.now-playing::after, .vm-small li.now-playing::after, .vm-tiles li.now-playing::after {
+    position: absolute; top: 8px; left: 12px; margin: 0;
+}
+/* Play all / Shuffle all stay full-width bars above the tiles. */
+.vm-large li.folder-play, .vm-small li.folder-play, .vm-tiles li.folder-play {
+    width: calc(100% - 16px); flex-direction: row; padding: 14px 24px;
+}
+.vm-large li.folder-play > * + *, .vm-small li.folder-play > * + *, .vm-tiles li.folder-play > * + * { margin-left: 20px; }
+.vm-large li.folder-play .icon, .vm-small li.folder-play .icon, .vm-tiles li.folder-play .icon {
+    width: 36px; height: auto; flex: 0 0 36px; font-size: 22px;
+}
+.vm-large li.folder-play .name, .vm-small li.folder-play .name, .vm-tiles li.folder-play .name {
+    text-align: left; margin: 0; font-size: 22px; display: block; max-height: none;
+}
+
+/* Photo thumbnail laid over the icon once it has loaded. */
+.browse-list .icon.has-thumb { position: relative; overflow: hidden; }
+.browse-list .icon.has-thumb img {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    object-fit: cover; opacity: 0; transition: opacity .2s ease;
+}
+.browse-list .icon.has-thumb img.ok { opacity: 1; }
+
+/* ── Large icons ── */
+.vm-large li { width: 236px; padding: 12px; display: flex; flex-direction: column; align-items: stretch; }
+.vm-large .icon {
+    width: 100%; height: 150px; flex: none; display: flex; align-items: center; justify-content: center;
+    font-size: 84px; border-radius: 10px; background: rgba(0,0,0,.18);
+}
+.vm-large .name {
+    flex: none; margin-top: 10px; text-align: center; font-size: 20px; line-height: 1.25; max-height: 2.5em;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
+}
+.vm-large .c-cc { display: block; text-align: center; margin-top: 4px; font-size: 15px; }
+
+/* ── Small icons ── */
+.vm-small li { width: 180px; padding: 8px; display: flex; flex-direction: column; align-items: stretch; }
+.vm-small .icon {
+    width: 100%; height: 92px; flex: none; display: flex; align-items: center; justify-content: center;
+    font-size: 52px; border-radius: 8px; background: rgba(0,0,0,.18);
+}
+.vm-small .name {
+    flex: none; margin-top: 8px; text-align: center; font-size: 16px; line-height: 1.25; max-height: 2.5em;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
+}
+.vm-small .progress { height: 3px; margin-top: 4px; }
+
+/* ── Tiles: picture on the left, name and details on the right ── */
+.vm-tiles li { width: 574px; min-height: 124px; padding: 14px 18px 14px 134px; display: block; }
+.vm-tiles .icon {
+    position: absolute; left: 14px; top: 14px; width: 96px; height: 96px;
+    display: flex; align-items: center; justify-content: center; font-size: 54px;
+    border-radius: 10px; background: rgba(0,0,0,.18);
+}
+.vm-tiles .name {
+    display: block; font-size: 22px; line-height: 1.25; max-height: 2.5em; overflow: hidden; word-break: break-word;
+}
+.vm-tiles .c-sub { display: block; margin-top: 8px; font-size: 17px; }
+.vm-tiles .progress { margin-top: 6px; }
+
+
+/* ═══ Megatron: toolbar, line icons, folder posters ═══════════════════ */
+.browse-bar {
+    display: none;
+    width: 100%; max-width: 1400px; box-sizing: border-box;
+    margin-bottom: 12px; align-items: center; text-align: left;
+}
+.browse-bar.on { display: flex; }
+.bar-btn {
+    background: var(--bg-card); color: var(--fg); font: inherit; font-size: 20px;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 10px 28px; margin-right: 16px; cursor: pointer;
+    transition: background .12s ease, box-shadow .12s ease;
+}
+.bar-btn.focused { background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent); }
+
+/* Line icons: one colour per kind of file. */
+.browse-list .icon svg { width: 1em; height: 1em; display: block; margin: 0 auto; fill: currentColor; }
+.browse-list .icon svg .cut  { fill: var(--bg); }
+.browse-list .icon svg .back { opacity: .55; }
+.browse-list .icon.k-dir      { color: var(--accent); }
+.browse-list .icon.k-video    { color: #ff9f6b; }
+.browse-list .icon.k-audio    { color: #b88cff; }
+.browse-list .icon.k-image    { color: #6be3a1; }
+.browse-list .icon.k-text     { color: #c5d0e0; }
+.browse-list .icon.k-playlist { color: #ffd166; }
+.browse-list .icon.k-other    { color: #8da0b8; }
+/* Once a picture has loaded it replaces the icon (transparent PNGs too). */
+.browse-list .icon.loaded > svg { visibility: hidden; }
+
+/* Folders are poster-shaped, so a movie poster fits without cropping. */
+.vm-large li[data-dir="1"] .icon { height: 300px; font-size: 110px; }
+.vm-small li[data-dir="1"] .icon { height: 150px; }
+.vm-tiles li[data-dir="1"] { min-height: 178px; padding-left: 150px; }
+.vm-tiles li[data-dir="1"] .icon { width: 112px; height: 150px; }
+.vm-tiles li[data-dir="1"] .icon img { object-fit: contain; }
+
+
+/* ═══ Megatron round A: layout, Tiles fix, info bar, themes ═══════════ */
+
+/* Use the whole screen: a slimmer header and an 1800 px wide list. */
+#view-browse { padding: 30px 60px 22px; }
+#view-browse .brand.small { margin-bottom: 18px; }
+#view-browse .browse-path, #view-browse .browse-list, #view-browse .browse-bar,
+#view-browse .browse-head, #view-browse .browse-info { max-width: 1800px; }
+
+/* Item count in the top-left corner. */
+.browse-count {
+    display: none; position: absolute; top: 40px; left: 60px;
+    font-size: 21px; color: var(--fg-dim);
+}
+.browse-count.on { display: block; }
+
+/* Details of the highlighted item. */
+.browse-info {
+    display: none; width: 100%; box-sizing: border-box; min-height: 92px;
+    margin-top: 14px; padding: 12px 28px; text-align: left;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r);
+}
+.browse-info.on { display: block; }
+.browse-info .bi-name {
+    font-size: calc(26px * var(--ts, 1)); font-weight: 600; color: var(--fg);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.browse-info .bi-meta { margin-top: 6px; font-size: calc(20px * var(--ts, 1)); color: var(--fg-mute); }
+.browse-info .bi-meta span + span::before { content: '·'; margin: 0 12px; color: var(--fg-dim); }
+
+/* Tiles: the picture stays on the left (the thumbnail rule used to override this). */
+.vm-tiles .icon.has-thumb, .vm-tiles .icon { position: absolute; }
+.vm-tiles li { text-align: left; }
+
+/* File list text size (names, details, toolbar, info bar). */
+:root { --ts: 1; }
+html[data-text="large"]  { --ts: 1.2; }
+html[data-text="xlarge"] { --ts: 1.4; }
+.vm-details li   { font-size: calc(21px * var(--ts, 1)); }
+.vm-list li      { font-size: calc(22px * var(--ts, 1)); }
+.vm-large .name  { font-size: calc(20px * var(--ts, 1)); }
+.vm-small .name  { font-size: calc(16px * var(--ts, 1)); }
+.vm-tiles .name  { font-size: calc(22px * var(--ts, 1)); }
+.vm-tiles .c-sub { font-size: calc(17px * var(--ts, 1)); }
+.bar-btn         { font-size: calc(20px * var(--ts, 1)); }
+
+/* ── Themes (the default is the original blue-slate look) ── */
+html[data-theme="amoled"] {
+    --bg: #000000; --bg-2: #0a0a0c; --bg-3: #141418;
+    --bg-card: #0f1013; --bg-card-h: #1c1e25;
+    --fg-mute: #c4cad3; --fg-dim: #8a909b;
+    --border: rgba(255,255,255,.11);
+}
+html[data-theme="light"] {
+    --bg: #eaeff6; --bg-2: #dfe6f0; --bg-3: #d2dbe9;
+    --bg-card: #ffffff; --bg-card-h: #d9e6f8;
+    --fg: #14202e; --fg-mute: #38485e; --fg-dim: #66768c;
+    --border: rgba(20,32,46,.14); --shadow: 0 8px 32px rgba(20,32,46,.18);
+}
+html[data-theme="light"] .vm-large li, html[data-theme="light"] .vm-small li,
+html[data-theme="light"] .vm-tiles li { background: rgba(20,32,46,.035); }
+html[data-theme="light"] .vm-large .icon, html[data-theme="light"] .vm-small .icon,
+html[data-theme="light"] .vm-tiles .icon { background: rgba(20,32,46,.07); }
+
+/* ── Accent colours ── */
+html[data-accent="blue"]   { --accent: #4d8dff; --accent-2: #86b2ff; --accent-soft: rgba(77,141,255,.22); }
+html[data-accent="green"]  { --accent: #4fd88a; --accent-2: #8aeab3; --accent-soft: rgba(79,216,138,.20); }
+html[data-accent="orange"] { --accent: #ffa24d; --accent-2: #ffc185; --accent-soft: rgba(255,162,77,.20); }
+html[data-accent="purple"] { --accent: #b48cff; --accent-2: #cfb4ff; --accent-soft: rgba(180,140,255,.22); }
+html[data-accent="pink"]   { --accent: #ff7eb6; --accent-2: #ffa6cc; --accent-soft: rgba(255,126,182,.22); }
+/* On the light theme the accent must be darker to stay readable on white. */
+html[data-theme="light"]                     { --accent: #0b7fc0; --accent-2: #3a9fd6; --accent-soft: rgba(11,127,192,.16); }
+html[data-theme="light"][data-accent="blue"]   { --accent: #2a62d9; --accent-2: #5a85e6; --accent-soft: rgba(42,98,217,.16); }
+html[data-theme="light"][data-accent="green"]  { --accent: #1c9a55; --accent-2: #4db97f; --accent-soft: rgba(28,154,85,.16); }
+html[data-theme="light"][data-accent="orange"] { --accent: #d9731a; --accent-2: #e8934a; --accent-soft: rgba(217,115,26,.16); }
+html[data-theme="light"][data-accent="purple"] { --accent: #7a4fd6; --accent-2: #9a7ae4; --accent-soft: rgba(122,79,214,.16); }
+html[data-theme="light"][data-accent="pink"]   { --accent: #d6407f; --accent-2: #e46fa0; --accent-soft: rgba(214,64,127,.16); }
+
+
+/* ═══ Megatron build 1: icons, progress, themes ═══════════════════════ */
+
+/* Line icons on the home tiles and the player controls. */
+.tile-icon { display: flex; align-items: center; justify-content: center; line-height: 0; }
+.tile-icon svg { width: 54px; height: 54px; display: block; fill: currentColor; }
+.ctrl svg { width: 52%; height: 52%; display: block; fill: currentColor; }
+.ctrl.big svg { width: 48%; height: 48%; }
+svg.stk { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ctrl svg.stk { stroke-width: 2.2; }
+.browse-list .icon.k-usb { color: var(--accent); }
+
+/* Percent watched: its own bar and badge on every video tile. */
+.browse-list .pbar, .browse-list .pct { display: none; }
+.vm-large .pbar, .vm-small .pbar, .vm-tiles .pbar {
+    display: block; position: absolute; left: 12px; right: 12px; bottom: 8px; height: 6px;
+    border-radius: 3px; background: rgba(128,128,128,.35); overflow: hidden;
+}
+.pbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.vm-large li.has-progress, .vm-small li.has-progress { padding-bottom: 26px; }
+.vm-tiles li.has-progress { padding-bottom: 30px; }
+.vm-tiles .pbar { left: 134px; right: 18px; }
+.vm-tiles li[data-dir="1"] .pbar { left: 150px; }
+.vm-large .pct, .vm-small .pct, .vm-tiles .pct {
+    display: block; position: absolute; top: 10px; right: 12px; z-index: 1;
+    padding: 2px 10px; border-radius: 999px; font-size: 16px; font-weight: 600;
+    background: var(--accent); color: var(--bg);
+}
+.vm-small .pct { top: 6px; right: 8px; padding: 1px 7px; font-size: 13px; }
+
+/* The columns and lines that a more general rule used to hide. */
+.browse-list.vm-details .c-date { display: block; width: 190px; flex: 0 0 190px; }
+.browse-list.vm-details .c-type { display: block; width: 84px;  flex: 0 0 84px; }
+.browse-list.vm-details .length { display: block; width: 84px;  flex: 0 0 84px; min-width: 0; text-align: right; }
+.browse-list.vm-details .c-size { display: block; width: 104px; flex: 0 0 104px; text-align: right; }
+.browse-list.vm-details .c-seen { display: block; width: 72px;  flex: 0 0 72px; text-align: right; }
+.browse-list.vm-large .c-cc, .browse-list.vm-tiles .c-cc { display: block; text-align: center; margin-top: 4px; font-size: 15px; }
+.browse-list.vm-tiles .c-sub { display: block; margin-top: 8px; text-align: left; font-size: calc(17px * var(--ts, 1)); }
+
+/* No empty box under the list when nothing is highlighted. */
+.browse-info:empty { visibility: hidden; }
+
+/* The player always sits on a dark scrim, whatever the theme. */
+html[data-theme="light"] #view-player,
+html[data-theme="warmlight"] #view-player,
+html[data-theme="babyblue"] #view-player {
+    --fg: #eef2f8; --fg-mute: #c3ccd9; --fg-dim: #8f9cb0;
+    --bg: #0b1018; --bg-2: #101826; --bg-3: #18233a; --bg-card: #141c2b; --bg-card-h: #1f2b42;
+    --border: rgba(255,255,255,.14); --shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+
+/* ── More themes ── */
+html[data-theme="midnight"] {
+    --bg: #0d0b1f; --bg-2: #141233; --bg-3: #1c1a45; --bg-card: #181638; --bg-card-h: #26235a;
+    --fg-mute: #bcb8e3; --fg-dim: #8581b8; --border: rgba(170,160,255,.18);
+}
+html[data-theme="forest"] {
+    --bg: #0c1a14; --bg-2: #11251c; --bg-3: #183226; --bg-card: #14281f; --bg-card-h: #1f3d2f;
+    --fg-mute: #b4cfc0; --fg-dim: #7fa392; --border: rgba(160,230,190,.16);
+}
+html[data-theme="grey"] {
+    --bg: #1b1c1e; --bg-2: #232426; --bg-3: #2c2d30; --bg-card: #26272a; --bg-card-h: #36373b;
+    --fg: #ececec; --fg-mute: #b8b9bc; --fg-dim: #85878c; --border: rgba(255,255,255,.12);
+}
+html[data-theme="warmlight"] {
+    --bg: #f6efe1; --bg-2: #efe5d1; --bg-3: #e6d9bf; --bg-card: #fffaf0; --bg-card-h: #f1e3c4;
+    --fg: #2b2216; --fg-mute: #54442d; --fg-dim: #85735a;
+    --border: rgba(70,50,20,.16); --shadow: 0 8px 32px rgba(70,50,20,.16);
+}
+html[data-theme="babyblue"] {
+    --bg: #e6f3fc; --bg-2: #d7ebf9; --bg-3: #c6e1f4; --bg-card: #f4fbff; --bg-card-h: #d2eafa;
+    --fg: #12304a; --fg-mute: #355a78; --fg-dim: #6288a4;
+    --border: rgba(18,48,74,.14); --shadow: 0 8px 32px rgba(18,48,74,.16);
+}
+html[data-theme="highcontrast"] {
+    --bg: #000000; --bg-2: #000000; --bg-3: #111111; --bg-card: #000000; --bg-card-h: #1c1a00;
+    --fg: #ffffff; --fg-mute: #ffffff; --fg-dim: #e2e2e2; --border: rgba(255,255,255,.85);
+}
+html[data-theme="blackwhite"] {
+    --bg: #000000; --bg-2: #0a0a0a; --bg-3: #151515; --bg-card: #0d0d0d; --bg-card-h: #202020;
+    --fg: #ffffff; --fg-mute: #cfcfcf; --fg-dim: #8f8f8f; --border: rgba(255,255,255,.24);
+}
+html[data-theme="highcontrast"][data-accent] { --accent: #ffe600; --accent-2: #fff176; --accent-soft: rgba(255,230,0,.26); }
+html[data-theme="blackwhite"][data-accent]   { --accent: #ffffff; --accent-2: #e0e0e0; --accent-soft: rgba(255,255,255,.18); }
+html[data-theme="blackwhite"] .browse-list .icon[class*="k-"] { color: #f2f2f2; }
+html[data-theme="highcontrast"] .vm-large li, html[data-theme="highcontrast"] .vm-small li,
+html[data-theme="highcontrast"] .vm-tiles li { background: #000; border-color: #fff; }
+
+/* ── Accent colours: the new ones, and darker ones on every light theme ── */
+html[data-accent="teal"] { --accent: #2fd1c0; --accent-2: #7ae6da; --accent-soft: rgba(47,209,192,.20); }
+html[data-accent="red"] { --accent: #ff5c5c; --accent-2: #ff8f8f; --accent-soft: rgba(255,92,92,.22); }
+html[data-accent="gold"] { --accent: #ffc83d; --accent-2: #ffdc82; --accent-soft: rgba(255,200,61,.22); }
+html[data-accent="lime"] { --accent: #b6ec4a; --accent-2: #d3f58a; --accent-soft: rgba(182,236,74,.20); }
+html[data-accent="indigo"] { --accent: #7b83ff; --accent-2: #a4aaff; --accent-soft: rgba(123,131,255,.24); }
+html[data-accent="white"] { --accent: #f2f4f8; --accent-2: #ffffff; --accent-soft: rgba(242,244,248,.20); }
+html[data-theme="light"] { --accent: #0b7fc0; --accent-2: #3a9fd6; --accent-soft: rgba(11,127,192,.16); }
+html[data-theme="warmlight"] { --accent: #0b7fc0; --accent-2: #3a9fd6; --accent-soft: rgba(11,127,192,.16); }
+html[data-theme="babyblue"] { --accent: #0b7fc0; --accent-2: #3a9fd6; --accent-soft: rgba(11,127,192,.16); }
+html[data-theme="light"][data-accent="blue"] { --accent: #2a62d9; --accent-2: #5a85e6; --accent-soft: rgba(42,98,217,.16); }
+html[data-theme="light"][data-accent="green"] { --accent: #1c9a55; --accent-2: #4db97f; --accent-soft: rgba(28,154,85,.16); }
+html[data-theme="light"][data-accent="orange"] { --accent: #d9731a; --accent-2: #e8934a; --accent-soft: rgba(217,115,26,.16); }
+html[data-theme="light"][data-accent="purple"] { --accent: #7a4fd6; --accent-2: #9a7ae4; --accent-soft: rgba(122,79,214,.16); }
+html[data-theme="light"][data-accent="pink"] { --accent: #d6407f; --accent-2: #e46fa0; --accent-soft: rgba(214,64,127,.16); }
+html[data-theme="light"][data-accent="teal"] { --accent: #0e8f84; --accent-2: #3fb3a8; --accent-soft: rgba(14,143,132,.16); }
+html[data-theme="light"][data-accent="red"] { --accent: #d0312d; --accent-2: #e2625e; --accent-soft: rgba(208,49,45,.16); }
+html[data-theme="light"][data-accent="gold"] { --accent: #b88400; --accent-2: #d1a53a; --accent-soft: rgba(184,132,0,.18); }
+html[data-theme="light"][data-accent="lime"] { --accent: #5c8f0a; --accent-2: #86b73c; --accent-soft: rgba(92,143,10,.18); }
+html[data-theme="light"][data-accent="indigo"] { --accent: #3f48c9; --accent-2: #6c73dd; --accent-soft: rgba(63,72,201,.16); }
+html[data-theme="light"][data-accent="white"] { --accent: #2b3340; --accent-2: #55606f; --accent-soft: rgba(43,51,64,.14); }
+html[data-theme="warmlight"][data-accent="blue"] { --accent: #2a62d9; --accent-2: #5a85e6; --accent-soft: rgba(42,98,217,.16); }
+html[data-theme="warmlight"][data-accent="green"] { --accent: #1c9a55; --accent-2: #4db97f; --accent-soft: rgba(28,154,85,.16); }
+html[data-theme="warmlight"][data-accent="orange"] { --accent: #d9731a; --accent-2: #e8934a; --accent-soft: rgba(217,115,26,.16); }
+html[data-theme="warmlight"][data-accent="purple"] { --accent: #7a4fd6; --accent-2: #9a7ae4; --accent-soft: rgba(122,79,214,.16); }
+html[data-theme="warmlight"][data-accent="pink"] { --accent: #d6407f; --accent-2: #e46fa0; --accent-soft: rgba(214,64,127,.16); }
+html[data-theme="warmlight"][data-accent="teal"] { --accent: #0e8f84; --accent-2: #3fb3a8; --accent-soft: rgba(14,143,132,.16); }
+html[data-theme="warmlight"][data-accent="red"] { --accent: #d0312d; --accent-2: #e2625e; --accent-soft: rgba(208,49,45,.16); }
+html[data-theme="warmlight"][data-accent="gold"] { --accent: #b88400; --accent-2: #d1a53a; --accent-soft: rgba(184,132,0,.18); }
+html[data-theme="warmlight"][data-accent="lime"] { --accent: #5c8f0a; --accent-2: #86b73c; --accent-soft: rgba(92,143,10,.18); }
+html[data-theme="warmlight"][data-accent="indigo"] { --accent: #3f48c9; --accent-2: #6c73dd; --accent-soft: rgba(63,72,201,.16); }
+html[data-theme="warmlight"][data-accent="white"] { --accent: #2b3340; --accent-2: #55606f; --accent-soft: rgba(43,51,64,.14); }
+html[data-theme="babyblue"][data-accent="blue"] { --accent: #2a62d9; --accent-2: #5a85e6; --accent-soft: rgba(42,98,217,.16); }
+html[data-theme="babyblue"][data-accent="green"] { --accent: #1c9a55; --accent-2: #4db97f; --accent-soft: rgba(28,154,85,.16); }
+html[data-theme="babyblue"][data-accent="orange"] { --accent: #d9731a; --accent-2: #e8934a; --accent-soft: rgba(217,115,26,.16); }
+html[data-theme="babyblue"][data-accent="purple"] { --accent: #7a4fd6; --accent-2: #9a7ae4; --accent-soft: rgba(122,79,214,.16); }
+html[data-theme="babyblue"][data-accent="pink"] { --accent: #d6407f; --accent-2: #e46fa0; --accent-soft: rgba(214,64,127,.16); }
+html[data-theme="babyblue"][data-accent="teal"] { --accent: #0e8f84; --accent-2: #3fb3a8; --accent-soft: rgba(14,143,132,.16); }
+html[data-theme="babyblue"][data-accent="red"] { --accent: #d0312d; --accent-2: #e2625e; --accent-soft: rgba(208,49,45,.16); }
+html[data-theme="babyblue"][data-accent="gold"] { --accent: #b88400; --accent-2: #d1a53a; --accent-soft: rgba(184,132,0,.18); }
+html[data-theme="babyblue"][data-accent="lime"] { --accent: #5c8f0a; --accent-2: #86b73c; --accent-soft: rgba(92,143,10,.18); }
+html[data-theme="babyblue"][data-accent="indigo"] { --accent: #3f48c9; --accent-2: #6c73dd; --accent-soft: rgba(63,72,201,.16); }
+html[data-theme="babyblue"][data-accent="white"] { --accent: #2b3340; --accent-2: #55606f; --accent-soft: rgba(43,51,64,.14); }
+html[data-theme="warmlight"] .vm-large li,
+html[data-theme="warmlight"] .vm-small li,
+html[data-theme="warmlight"] .vm-tiles li,
+html[data-theme="babyblue"] .vm-large li,
+html[data-theme="babyblue"] .vm-small li,
+html[data-theme="babyblue"] .vm-tiles li { background: rgba(20,32,46,.035); }
+html[data-theme="warmlight"] .vm-large .icon,
+html[data-theme="warmlight"] .vm-small .icon,
+html[data-theme="warmlight"] .vm-tiles .icon,
+html[data-theme="babyblue"] .vm-large .icon,
+html[data-theme="babyblue"] .vm-small .icon,
+html[data-theme="babyblue"] .vm-tiles .icon { background: rgba(20,32,46,.07); }
+html[data-theme="light"] .browse-list .icon.k-text,
+html[data-theme="warmlight"] .browse-list .icon.k-text,
+html[data-theme="babyblue"] .browse-list .icon.k-text { color: #5f6f86; }
+html[data-theme="light"] .browse-list .icon.k-other,
+html[data-theme="warmlight"] .browse-list .icon.k-other,
+html[data-theme="babyblue"] .browse-list .icon.k-other { color: #6b7a90; }
+html[data-theme="light"] .browse-list .icon.k-playlist,
+html[data-theme="warmlight"] .browse-list .icon.k-playlist,
+html[data-theme="babyblue"] .browse-list .icon.k-playlist { color: #c58b00; }
+html[data-theme="light"] .browse-list .icon.k-audio,
+html[data-theme="warmlight"] .browse-list .icon.k-audio,
+html[data-theme="babyblue"] .browse-list .icon.k-audio { color: #7b4fe0; }
+html[data-theme="light"] .browse-list .icon.k-video,
+html[data-theme="warmlight"] .browse-list .icon.k-video,
+html[data-theme="babyblue"] .browse-list .icon.k-video { color: #e0691f; }
+html[data-theme="light"] .browse-list .icon.k-image,
+html[data-theme="warmlight"] .browse-list .icon.k-image,
+html[data-theme="babyblue"] .browse-list .icon.k-image { color: #1b9b5c; }
+
+/* Header logo: a mark that stays readable at 56 px. */
+.app-icon { background: transparent; }
+
+
+/* ═══ Megatron build 2: startup, backgrounds, fanart ═══════════════════ */
+
+/* Startup: nothing is shown until the right screen has been chosen. */
+#splash {
+    display: none; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 9999;
+    align-items: center; justify-content: center; background: var(--bg);
+}
+#splash img { width: 132px; height: 132px; }
+html.booting #splash { display: flex; }
+html.booting .view { visibility: hidden; }
+
+/* One layer behind the menu screens. */
+#app-bg {
+    display: none; position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 0; pointer-events: none;
+}
+#app-bg.on { display: block; }
+html[data-view="view-player"] #app-bg, html[data-view="view-image"] #app-bg, html[data-view="view-text"] #app-bg { display: none; }
+#app-bg .bg-img { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background-size: cover; background-position: center; }
+#app-bg .bg-dim { display: none; position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: var(--bg); opacity: 0; }
+#app-bg.pic .bg-dim { display: block; }
+#app-bg.aurora {
+    background:
+        radial-gradient(60% 50% at 18% 12%, var(--accent-soft), transparent 72%),
+        radial-gradient(54% 48% at 88% 88%, var(--accent-soft), transparent 74%),
+        var(--bg);
+}
+html[data-bgon="1"] #view-home, html[data-bgon="1"] #view-url,
+html[data-bgon="1"] #view-browse, html[data-bgon="1"] #view-settings { background: transparent; }
+html[data-bgon="1"] .browse-list { background: transparent; border-color: transparent; }
+
+/* Tiles: leave room for the percent badge, keep the CC note on the left. */
+.vm-tiles li.has-progress .name { padding-right: 72px; }
+.browse-list.vm-tiles .c-cc { display: block; text-align: left; margin-top: 6px; font-size: 16px; }
+
+/* Logos and other transparent pictures are shown whole, not cropped. */
+.browse-list .icon.contain img { object-fit: contain; padding: 10px; box-sizing: border-box; }
+
+
+/* ═══ Megatron build 2.1: clearer pictures, splash name ═══════════════ */
+:root { --bg-rgb: 30,42,61; }
+html[data-theme="amoled"] { --bg-rgb: 0,0,0; }
+html[data-theme="light"] { --bg-rgb: 234,239,246; }
+html[data-theme="midnight"] { --bg-rgb: 13,11,31; }
+html[data-theme="forest"] { --bg-rgb: 12,26,20; }
+html[data-theme="grey"] { --bg-rgb: 27,28,30; }
+html[data-theme="warmlight"] { --bg-rgb: 246,239,225; }
+html[data-theme="babyblue"] { --bg-rgb: 230,243,252; }
+html[data-theme="highcontrast"] { --bg-rgb: 0,0,0; }
+html[data-theme="blackwhite"] { --bg-rgb: 0,0,0; }
+
+/* With a picture behind, the list sits on a see-through panel of the theme colour
+ * (readable text, picture still visible) instead of being opaque or bare. */
+html[data-bgon="1"] .browse-list { background: rgba(var(--bg-rgb), .58); border-color: transparent; }
+
+/* Splash: the logo with the name next to it. */
+#splash span { margin-left: 30px; font-size: 92px; font-weight: 600; letter-spacing: .01em; color: var(--fg); }
+
+
+/* ═══ Megatron build 2.3: readable text over a picture ═══════════════ */
+html[data-bgon="1"] .browse-count {
+    color: var(--fg); background: rgba(var(--bg-rgb), .62);
+    padding: 4px 14px; border-radius: 999px;
+}
+html[data-bgon="1"] .browse-path, html[data-bgon="1"] #browse-title, html[data-bgon="1"] .hint {
+    text-shadow: 0 0 6px rgba(var(--bg-rgb), .95), 0 1px 3px rgba(var(--bg-rgb), .9);
+}
+
+/* ── Player bar (Build 3a) ────────────────────────────────────────── */
+#osd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osd-clock {
+    flex: 0 0 auto; margin-left: 40px;
+    font-size: 24px; color: var(--fg-mute);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.time-btn {
+    font-size: 22px; font-variant-numeric: tabular-nums;
+    color: var(--fg); padding: 4px 12px; border-radius: 8px;
+    border: 2px solid transparent; min-width: 96px; text-align: right;
+}
+.time-btn:focus, .time-btn.focused { border-color: var(--accent); background: var(--accent-soft); }
+/* Centre group stays truly centred: the two sides take equal width. */
+.ctrl-side { flex: 1 1 0; display: flex; align-items: center; }
+.ctrl-side.right { justify-content: flex-end; }
+.ctrl-main { flex: 0 0 auto; display: flex; align-items: center; }
+.ctrl-main > .ctrl + .ctrl { margin-left: 20px; }
+.ctrl-side.right > .ctrl + .ctrl { margin-left: 16px; }
+.ctrl svg { width: 30px; height: 30px; fill: currentColor; }
+.ctrl.big svg { width: 44px; height: 44px; }
+.ctrl svg.stk { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.ctrl#btn-cc { font-size: 20px; font-weight: 700; letter-spacing: 1px; border-radius: 16px; width: 76px; }
+
+/* ── Tabbed panel ─────────────────────────────────────────────────── */
+.track-menu { min-width: 620px; max-width: 760px; }
+.panel-tabs {
+    display: flex; margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+}
+.panel-tab {
+    flex: 1 1 0; padding: 12px 8px 14px;
+    font-size: 21px; color: var(--fg-dim);
+    border-bottom: 4px solid transparent; margin-bottom: -1px;
+    text-align: center; white-space: nowrap;
+}
+.panel-tab.sel { color: var(--fg); border-bottom-color: var(--accent); }
+.panel-tab:focus, .panel-tab.focused { color: var(--fg); background: var(--accent-soft); border-radius: 10px 10px 0 0; }
+.track-menu > .btn { margin-top: 16px; align-self: flex-end; }
+/* One section per tab: only the open tab's sections show. */
+#track-menu .track-section { display: none; }
+#track-menu[data-tab="subs"]  .track-section[data-tab="subs"],
+#track-menu[data-tab="audio"] .track-section[data-tab="audio"],
+#track-menu[data-tab="video"] .track-section[data-tab="video"],
+#track-menu[data-tab="info"]  .track-section[data-tab="info"] { display: block; }
+.file-info dl, dl#file-info-list { margin: 0; }
+#file-info-list dt { color: var(--fg-dim); font-size: 16px; text-transform: uppercase; letter-spacing: 1.2px; margin-top: 12px; }
+#file-info-list dd { margin: 2px 0 0; color: var(--fg); font-size: 22px; word-break: break-all; }
+
+/* ── Subtitles lift above the player bar while it is showing ───────── */
+.sub-band-bottom { transition: bottom .2s ease; }
+body.osd-up .sub-band-bottom { bottom: 250px; }
+
+/* ── CC opens its own Subtitles panel; the gear panel has no Subtitles tab ── */
+.panel-tab[data-tab="subs"] { display: none; }
+#track-menu[data-tab="subs"] .panel-tabs { display: none; }
+#track-menu[data-tab="subs"]::before {
+    content: "CC";
+    display: block; margin-bottom: 16px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 22px; font-weight: 700; letter-spacing: 2px; color: var(--accent);
+}
+
+/* ── Next episode countdown ───────────────────────────────────────── */
+.next-up {
+    position: absolute; right: 60px; bottom: 260px;
+    display: flex; align-items: center;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 18px 24px;
+    box-shadow: var(--shadow); pointer-events: auto;
+}
+.next-up .nu-text { font-size: 22px; margin-right: 24px; }
+
+/* ── Custom skip length field in the picker ────────────────────────── */
+.picker-custom { display: flex; align-items: center; margin-bottom: 20px; }
+.picker-custom input {
+    flex: 1 1 0; min-width: 0; width: 0; font-size: 26px; padding: 12px 16px; margin-right: 16px;
+    background: var(--bg-2); color: var(--fg);
+    border: 2px solid var(--border); border-radius: var(--r-sm);
+}
+.picker-custom input.focused, .picker-custom input:focus { border-color: var(--accent); }
+
+/* ── Player buttons: glass outline look (final, style D) ──────────── */
+.controls .ctrl {
+    background: rgba(255,255,255,.06);
+    border: 2px solid rgba(255,255,255,.55);
+    border-radius: 999px;
+    color: var(--fg);
+}
+.controls .ctrl.big { background: rgba(255,255,255,.14); border: 3px solid #fff; color: #fff; }
+.controls .ctrl#btn-cc { border-radius: 999px; width: 84px; }
+.controls .ctrl:focus, .controls .ctrl.focused {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: 0 0 24px var(--accent);
+    transform: scale(1.08);
+}
+.controls .ctrl.big:focus, .controls .ctrl.big.focused { background: var(--accent-soft); border-color: var(--accent); color: #fff; }
+
+/* ── Focused tile keeps its own padding (the generic focused-row rule used to win) ── */
+.browse-list.vm-large li.focused { padding-left: 12px; border-left: 1px solid var(--accent); }
+.browse-list.vm-small li.focused { padding-left: 8px; border-left: 1px solid var(--accent); }
+.browse-list.vm-tiles li.focused { padding-left: 134px; border-left: 1px solid var(--accent); }
+.browse-list.vm-tiles li[data-dir="1"].focused { padding-left: 150px; }
+
+/* while leaving the player keep an opaque backdrop so the screen is never black */
+html[data-leaving="1"] #view-browse,html[data-leaving="1"] #view-home{background-color:#1e2a3d}
+
+/* current time, top right, every screen except the player */
+#global-clock { position: fixed; top: 22px; right: 48px; z-index: 40; margin: 0; pointer-events: none; text-shadow: 0 0 6px rgba(var(--bg-rgb), .9); }
+html[data-view="view-player"] #global-clock { display: none; }

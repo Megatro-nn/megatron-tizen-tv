@@ -1,0 +1,198 @@
+name: Build Megatron WGT
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'tizen-app/**'
+      - '.github/workflows/build-wgt.yml'
+
+permissions:
+  contents: write
+
+env:
+  TIZEN_STUDIO_VER: 5.5
+  APP_ID:           megatrontv.megatron
+  PROFILE:          VLCTV
+  CERT_PASSWORD:    1234
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        run: sudo apt-get update && sudo apt-get install -y expect libxml2-utils
+
+      - name: Download Tizen Studio CLI
+        run: |
+          curl -sSLo tizen-installer \
+            "https://download.tizen.org/sdk/Installer/tizen-studio_${TIZEN_STUDIO_VER}/web-cli_Tizen_Studio_${TIZEN_STUDIO_VER}_ubuntu-64.bin"
+
+      - name: Install Tizen Studio
+        run: |
+          chmod +x tizen-installer
+          ./tizen-installer --accept-license "${GITHUB_WORKSPACE}/tizen-studio"
+          rm tizen-installer
+
+      - name: Create author certificate + security profile
+        run: |
+          TIZEN="${GITHUB_WORKSPACE}/tizen-studio/tools/ide/bin/tizen"
+          DATA_DIR="${GITHUB_WORKSPACE}/tizen-studio-data"
+
+          $TIZEN certificate \
+              -a VLCTV -p ${CERT_PASSWORD} \
+              -c US -s California -ct SanFrancisco \
+              -o VLCTV -n VLCTV-Author \
+              -e dev@example.org \
+              -f vlctvAuthor
+
+          $TIZEN security-profiles add \
+              -n ${PROFILE} \
+              -a "${DATA_DIR}/keystore/author/vlctvAuthor.p12" \
+              -p ${CERT_PASSWORD}
+
+          $TIZEN cli-config "profiles.path=${DATA_DIR}/profile/profiles.xml"
+
+      - name: Patch profiles.xml with passwords
+        # The CLI leaves passwords blank or pointed at .pwd files that don't
+        # exist on the runner substitute literal passwords so signing works
+        # non-interactively.
+        run: |
+          DATA_DIR="${GITHUB_WORKSPACE}/tizen-studio-data"
+          PROFILES="${DATA_DIR}/profile/profiles.xml"
+
+          sed -i "s|${DATA_DIR}/keystore/author/vlctvAuthor.pwd|${CERT_PASSWORD}|g" "$PROFILES"
+          sed -i "s|${DATA_DIR}/tools/certificate-generator/certificates/distributor/tizen-distributor-signer.pwd|tizenpkcs12passfordsigner|g" "$PROFILES"
+          sed -i 's|password=""|password="tizenpkcs12passfordsigner"|g' "$PROFILES"
+
+      - name: Validate web app source
+        run: |
+          TIZEN="${GITHUB_WORKSPACE}/tizen-studio/tools/ide/bin/tizen"
+          cd tizen-app
+          # build-web prepares .buildResult/ with the bundle to sign
+          $TIZEN build-web -- "$PWD"
+
+      - name: Bundle background service for Tizen 10
+        run: |
+          rm -rf tizen-app/.buildResult/service/*
+          node scripts/bundle-service.js tizen-app/.buildResult/service/service.js
+
+      - name: Sign + package WGT (non-interactive via expect)
+        run: |
+          cat > package.exp << 'EOF'
+          #!/usr/bin/expect -f
+          set timeout 300
+          spawn $env(GITHUB_WORKSPACE)/tizen-studio/tools/ide/bin/tizen package -t wgt -s $env(PROFILE) -- $env(GITHUB_WORKSPACE)/tizen-app/.buildResult
+          expect {
+            "Author password:"        { send "$env(CERT_PASSWORD)\r"; exp_continue }
+            "Save author password"    { send "n\r"; exp_continue }
+            "Distributor1 password:"  { send "tizenpkcs12passfordsigner\r"; exp_continue }
+            "Save distributor1 password" { send "n\r"; exp_continue }
+            eof
+          }
+          EOF
+          chmod +x package.exp
+          ./package.exp
+
+          # Move the signed wgt out of the build result
+          mkdir -p release
+          mv tizen-app/.buildResult/*.wgt release/megatron.wgt
+          ls -lh release/
+
+      - name: Compute version + date tags
+        id: meta
+        run: |
+          VERSION=$(xmllint --xpath 'string(/*/@version)' tizen-app/config.xml)
+          DATE_TAG=$(date +'%Y%m%d-%H%M')
+          DATE_PRETTY=$(date +'%Y-%m-%d %H:%M UTC')
+          {
+            echo "version=$VERSION"
+            echo "date_tag=$DATE_TAG"
+            echo "date_pretty=$DATE_PRETTY"
+          } >> "$GITHUB_OUTPUT"
+
+      # Non-Docker users download the server from the app release too, so it
+      # carries the five native zips (and the Android APK) of the newest
+      # transcode-v* release.  The
+      # transcode-server-native workflow does the same the other way round when
+      # a server tag lands after this release.
+      - name: Fetch latest transcode-server zips
+        id: server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+                  --jq '[.[] | select(.tagName | startswith("transcode-v"))] | sort_by(.createdAt) | last | .tagName // ""')
+          if [ -z "$TAG" ]; then
+            echo "No transcode-v* release found; the app release goes out without server zips."
+            exit 0
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'tessel-transcode-*.zip' --pattern 'tessel-transcode-*.apk' --dir release
+          ls -lh release/
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Backstop for the version-check PR workflow: a push to main that did not
+      # bump config.xml would otherwise stamp a second release with the same
+      # version.  Fail here instead of publishing a duplicate.
+      - name: Refuse to release an already released version
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # gh's --jq takes no --arg; the version comes in through env.
+          EXISTING=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName \
+                       --jq '[.[].tagName | select(startswith("v" + env.VERSION + "-"))] | join(", ")')
+          if [ -n "$EXISTING" ]; then
+            echo "::error file=tizen-app/config.xml::version $VERSION is already released as $EXISTING; bump the version in tizen-app/config.xml"
+            exit 1
+          fi
+          echo "No release for v$VERSION yet."
+
+      - name: Upload artifact (per-run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: megatron-${{ steps.meta.outputs.date_tag }}
+          path: release/megatron.wgt
+
+      - name: Create GitHub Release
+        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 'v${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.date_tag }}'
+          name:    'Megatron v${{ steps.meta.outputs.version }} ${{ steps.meta.outputs.date_pretty }}'
+          files:   release/*
+          body: |
+            # Megatron for Samsung Tizen TVs
+
+            Built ${{ steps.meta.outputs.date_pretty }} by GitHub Actions. Based on [Tessel](https://github.com/PatrickSt1991/tessel-tizen-tv) by Patrick (MIT).
+
+            ## Install
+
+            1. Turn on Developer Mode on your TV (`Apps → 1 2 3 4 5 → Developer Mode = ON`,
+               set Host PC IP to your computer's IP, restart the TV).
+            2. Download `megatron.wgt` from the assets below.
+            3. Install it with [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases/latest)
+               (connect to your TV, choose to install a local `.wgt` file; it signs the app for your TV),
+               **or** re-sign it yourself and sideload:
+
+               ```bash
+               tizen package -t wgt -s YourProfile -- /path/to/megatron.wgt
+               sdb connect <tv-ip>
+               sdb install megatron.wgt
+               ```
+
+            > The `.wgt` here is signed with a generic CI certificate and will not match your TV's DUID until it is re-signed.
+
+            Megatron installs next to Tessel (separate app ID); it does not replace it.
+
+            ## Whats in this build
+            - All sources at the matching commit
+            - Output: `megatron.wgt`
+          draft:      false
+          prerelease: false
