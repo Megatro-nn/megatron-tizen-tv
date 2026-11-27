@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Removed the Apple and Mux sample stream buttons from the Play URL screen.
+
 ## 1.0.0
 
 First Megatron release, forked from Tessel 1.37.3.
