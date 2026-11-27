@@ -24,8 +24,8 @@ var UrlDrop = (function () {
 
     var CODE_KEY   = 'urlDropCode';
     var NTFY_BASE  = 'https://ntfy.sh';
-    // GitHub Pages page users open on their phone (served from docs/index.html).
-    var PHONE_PAGE = 'https://megatro-nn.github.io/megatron-tizen-tv/';
+    // GitHub Pages page users open on their phone (served from docs/send/index.html).
+    var PHONE_PAGE = 'https://megatro-nn.github.io/megatron-tizen-tv/send/';
 
     function log(m) { if (typeof Debug !== 'undefined' && Debug.net) Debug.net('[url-drop] ' + m); }
 

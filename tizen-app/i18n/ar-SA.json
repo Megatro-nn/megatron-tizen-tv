@@ -260,6 +260,7 @@
   "cast.qrAlt": "رمز QR للإقران",
   "cast.keepPrivate": "أبقِ هذا الرمز سرياً. أي شخص يملكه يستطيع إرسال روابط إلى تلفازك. لا تنشره ولا تشارك لقطات شاشة منه.",
   "cast.newCode": "إنشاء رمز جديد",
+  "cast.apps": "تطبيق للهاتف (أندرويد وآيفون): github.com/Megatro-nn/megatrontizentv-send-to",
   "cast.newCodeConfirm": "إنشاء رمز جديد؟ الهواتف المقترنة بالرمز القديم ستتوقف حتى تمسح رمز QR الجديد.",
   "cast.newCodeDone": "الرمز الجديد جاهز",
   "browse.storage": "وحدات التخزين",
