@@ -125,10 +125,10 @@ Ideas for later. None of these are promised, and the order can change.
 - Video thumbnails.
 
 **Send to Megatron (phone)**
-- A link queue and a "Recently sent" list on the send page.
+Done already: the [Megatron Send apps](https://github.com/Megatro-nn/megatrontizentv-send-to) for Android and iPhone, and a link queue and "Recently sent" list on the send page.
+
+Still ideas:
 - Settings backup and restore as one file from the phone page.
-- An installable web page (works on iPhone and Android).
-- An Android APK with a Share menu entry.
 - An iOS Shortcut for the Share menu.
 
 ## Translations
